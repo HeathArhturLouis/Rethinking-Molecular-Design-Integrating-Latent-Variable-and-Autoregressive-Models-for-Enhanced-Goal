@@ -195,15 +195,17 @@ class SDLSTMSampler:
 
 
 if __name__ == '__main__':
-    model_weights = '../models/SD_LSTM_QM9/batch_size_20_1/LSTM_20_1.682.pt'
-    model_definit = '../models/SD_LSTM_QM9/batch_size_20_1/LSTM_20_1.682.json'
+    model_weights = '../models/SD_LSTM_QM9_BCE/batch_size_64_1/LSTM_40_1.489.pt'
+    model_definit = '../models/SD_LSTM_QM9_BCE/batch_size_64_1/LSTM_40_1.489.json'
 
     sampler = SDLSTMSampler(batch_size = 64, device = 'cpu', rules_dict_size = 80)
 
     model = load_model(model_definit, model_weights, device='cpu')
 
+    print(sampler.sample( model=model, num_to_sample=100,  properties= torch.Tensor([[2.5] for _ in range(100)]),max_seq_len=100 ))
+
     #print(sampler.sample_batch_unconstrained_logits(model=model, max_rules=100, property_values=torch.Tensor([1.0])))
-    print(sampler.sample(model=model, num_to_sample = 100, properties=torch.Tensor([[1], [0]]), max_seq_len = 100))
+    # print(sampler.sample(model=model, num_to_sample = 100, properties=torch.Tensor([[1], [0]]), max_seq_len = 100))
 
     #TODO: Test if max_seq_len is negotiable
     # sample = sampler.sample(model=model, properties=torch.Tensor([[1.0]]), num_to_sample=100, max_seq_len=100)

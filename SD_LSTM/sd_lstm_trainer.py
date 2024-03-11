@@ -19,7 +19,7 @@ from sd_lstm_utils import load_encodings_masks_and_properties, get_tensor_datase
 
 from sd_smiles_decoder import raw_logit_to_smiles
 
-from property_calculator import PropertyCalculator
+from property_calculator import my_perp_loss  
 from sd_loss_computation import PerpCalculator
 
 from sd_lstm_model import ConditionalSDLSTM
@@ -29,11 +29,13 @@ from rdkit import Chem
 
 import pandas as pd
 
+import torch.autograd.profiler as profiler
+
 
 
 class SDLSTMDistributionLearner:
     def __init__(self, data_set, output_dir, n_epochs, hidden_size=512, n_layers=3,
-                 max_len=100, batch_size=64, rnn_dropout=0.2, lr=1e-3, valid_every=100, print_every=100, prop_model=None) -> None:
+                 max_len=100, batch_size=64, rnn_dropout=0.2, lr=1e-3, valid_every=100, print_every=100, prop_model=None, num_data_workers=0) -> None:
         self.data_set = data_set
         self.n_epochs = n_epochs
         self.output_dir = output_dir
@@ -47,6 +49,7 @@ class SDLSTMDistributionLearner:
         self.print_every = print_every
         self.prop_model = prop_model
         self.seed = 42
+        self.num_data_workers = num_data_workers
 
     def train(self, data_path):
         # Use GPU if available
@@ -96,41 +99,35 @@ class SDLSTMDistributionLearner:
         
         # Determine loss function
 
-        #LOUIS: Remove pad_idx this for now since we'll be changing the loss funct anyways
-        # criterion = torch.nn.CrossEntropyLoss(ignore_index=sd.pad_idx)
-        criterion = torch.nn.CrossEntropyLoss()
-
         trainer = SDLSTMTrainer(normalizer_mean = mean,
                                    normalizer_std = std,
                                    model=cond_lstm_model,
-                                   criteria=[criterion],
                                    optimizer=optimizer,
                                    device=device,
                                    prop_names = property_names,
                                    log_dir=self.output_dir)
+
 
         trainer.fit(train_set, valid_set,
                     self.n_epochs, 
                      batch_size=self.batch_size,
                      print_every=self.print_every,
                      valid_every=self.valid_every,
-                     num_workers=0)
+                     num_workers=self.num_data_workers)
 
 
 class SDLSTMTrainer:
-    def __init__(self, normalizer_mean, normalizer_std, model, criteria, optimizer, device, prop_names, log_dir=None, clip_gradients=True) -> None:
+    def __init__(self, normalizer_mean, normalizer_std, model, optimizer, device, prop_names, log_dir=None, clip_gradients=True) -> None:
         '''
         normalizer_mean
         normalizer_std
         model - SD LSTM model
-        criteria - Loss function computation
         optimizer - optimizer, implements .step()
         device - 'cpu' or 'gpu'
         prop_names - List of property names
         '''
 
         self.model = model.to(device)
-        self.criteria = [c.to(device) for c in criteria]
         self.optimizer = optimizer
         self.device = device
         self.log_dir = log_dir
@@ -204,11 +201,14 @@ class SDLSTMTrainer:
         '''
         # Loss computation
 
-        # TODO: Cleanup comment: Using the perplexity computation from SD-VAE instead
-        # loss = self.criteria[0](output, tgt.view(-1))
+
         # PerpLoss expects [time_steps, batch_size, DECISION_DIM]
         # We have [batch_size, time_steps, DECISION_DIM]
         # We can convert with .permute(1, 0, 2)
+
+        # Pre permutation: 
+        #   target (int 65), loss (float32), output (float32)    [50, 99, 80] batch_size x seq_len x decision_dim
+        # Post permutation:  [99, 50, 80] seq_len x batch_size x decision_dim
 
         loss = self.loss_calc(tgt.permute(1, 0, 2), mask.permute(1, 0, 2), output.permute(1, 0, 2))[0]
         # loss is now in form: tensor([54.0789], grad_fn=<MyPerpLossBackward>) so we take [0]
@@ -311,95 +311,7 @@ class SDLSTMTrainer:
             print('Error computing property MSE')
 
         return sum_squared_diffs / count
-    
-    '''
-    def test_on_batch_MSE(self, batch, properties):
-        # Evaluates the model's performance on a single batch by calculating the Mean Squared Error (MSE)
-        # between the properties of generated sequences and the true properties.
-
-        # Setup model for evaluation
-        self.model.eval()
-
-        # forward
-        #inp, tgt = batch[:, :-1], batch[:, 1:]
-        # Unpack and send to device
-        inp, tgt, mask = batch
-        inp = inp.to(self.device)
-        tgt = tgt.to(self.device)
-        mask = mask.to(self.device)
-        properties = properties.to(self.device)
-
-        batch_size = inp.size(0)
-
-        hidden = self.model.init_hidden(inp.size(0), self.device)
-
-        # TODO: Note Float conversion
-        output, hidden = self.model(inp.float(), properties, hidden)
-
-        # Old code: Take argmax to convert logits to discrete numbers
-        # we don't need this as our converter accepts logits directly
-        # indices = output.argmax(dim = 2)
-        
-        ## Retrieve SMILES for batch
-        # smiles = np.array(sd.matrix_to_smiles(indices))
-
-        # output is shape [20, 99, 80]
-
-        # Is the logits format [batchsize, timesteps, predictiondimension] ? 
-        # Or is it [timesteps, batchsize, predictiondimension] ? 
-        
-        #TODO: LOUIS: This could be improved as per the sampler I wrote
-        smiles = raw_logit_to_smiles(output.permute(1, 0, 2), use_random=False)
-
-        # Need to get a list of smiles though
-
-        # Seems to need permuting, this makes sense seeing as the code I got it from expects that format
-        # smiles = raw_logit_to_smiles(output)
-
-        valid = []
-        valid_index = []
-        prop = []
-
-        #LOUIS: Silence RDKit
-        logger = RDLogger.logger()
-        logger.setLevel(RDLogger.CRITICAL)
-
-        # LOUIS: TODO: Remove debug code 
-
-        ### Convert SMILES to RDKit Molecular format
-        for i in range(len(smiles)):
-            mol = Chem.MolFromSmiles(smiles[i])
-            try:
-                valid.append(Chem.MolToSmiles(mol))
-
-                prop.append(self.property_cal(mol))
-                valid_index.append(i)
-                # TODO: Remove
-            except:
-                #### LOUIS: Is loud when model fails to generate valid molecule
-                pass   
-
-
-        # Louis, reset the logging verbosity
-        logger.setLevel(RDLogger.INFO)
-        
-        # Compute the mean property errors
-        if np.array(valid_index).shape[0] == 0:
-            #LOUIS: This is missreporting in some sense, loss shuold be inf not zero if no valid smiles
-            loss = 0
-        else:
-            #LOUIS: This is where I the fixed property size comes into play
-            prop = (np.array(prop) - self.mean ) / self.std
-            #output_prop = (properties[np.array(valid_index),:].cpu().detach().numpy() - self.mean ) / self.std
-            loss = np.absolute(prop - properties[np.array(valid_index),:].cpu().detach().numpy()).mean()
-
-
-        #output = output.view(output.size(0) * output.size(1), -1)
-        #loss = self.criteria(output, tgt.view(-1))
-        #final_loss, entropy, MLE, batch_size = self.process_batch(batch, properties, k_sampled)
-
-        return loss, batch_size
-    '''
+   
     
     def validate_MSE(self, data_loader, n_molecule):
         """Runs validation and reports the average loss"""
@@ -491,27 +403,32 @@ class _ModelTrainingRound:
         return self.all_train_losses, self.all_valid_losses
 
     def _train_one_epoch(self, epoch_index: int):
-        print(f'EPOCH {epoch_index}')
+            # with profiler.profile() as prof:
 
-        # shuffle at every epoch
-        data_loader = DataLoader(self.training_data,
-                                 batch_size=self.batch_size,
-                                 shuffle=True,
-                                 num_workers=self.num_workers,
-                                 pin_memory=True)
+            print(f'EPOCH {epoch_index}')
+            # shuffle at every epoch
+            data_loader = DataLoader(self.training_data,
+                                    batch_size=self.batch_size,
+                                    shuffle=True,
+                                    num_workers=self.num_workers,
+                                    pin_memory=True)
 
-        epoch_t0 = time()
-        self.unprocessed_train_losses.clear()
+            epoch_t0 = time()
+            self.unprocessed_train_losses.clear()
 
-        for batch_index, batch_all in enumerate(data_loader):
-            batch = batch_all[:-1]
-            properties = batch_all[-1]
-            self._train_one_batch(batch_index, batch, properties, epoch_index, epoch_t0)
+            for batch_index, batch_all in enumerate(data_loader):
+                batch = batch_all[:-1]
+                properties = batch_all[-1]
+                self._train_one_batch(batch_index, batch, properties, epoch_index, epoch_t0)
+            
+            # report validation progress?
+
+            if epoch_index % self.valid_every == 0:
+                self._report_validation_progress(epoch_index)
         
-        # report validation progress?
-
-        if epoch_index % self.valid_every == 0:
-            self._report_validation_progress(epoch_index)
+            # profiler.emit_nvtx()
+            # print('TODO: Remove profiler!!!!')
+            # print(prof.key_averages().table(sort_by="self_cpu_time_total"))
 
 
     def _train_one_batch(self, batch_index, batch, properties, epoch_index, train_t0):
@@ -523,6 +440,7 @@ class _ModelTrainingRound:
         # report training progress?
         if batch_index > 0 and batch_index % self.print_every == 0:
             self._report_training_progress(batch_index, epoch_index, epoch_start=train_t0)
+
 
 
     def _report_training_progress(self, batch_index, epoch_index, epoch_start):

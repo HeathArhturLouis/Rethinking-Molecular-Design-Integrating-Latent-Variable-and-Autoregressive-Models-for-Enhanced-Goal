@@ -34,13 +34,29 @@ def load_model(model_definition, model_weights, device, model_class=ConditionalS
     model.load_state_dict(torch.load(model_weights, map_location))
     return model.to(device)
 
+def get_tensor_dataset_alt(grammar_encodings, rule_masks, properties_array):
+    """
+    Adjusted function to include shifted masks for syntax-directed model training.
+    """
+
+    grammar_tensor = torch.from_numpy(grammar_encodings).float()
+    masks_tensor = torch.from_numpy(rule_masks).float()
+    props_tensor = torch.from_numpy(properties_array).float()
+
+    inp_tensor = grammar_tensor[:, :-1]
+    target_tensor = grammar_tensor[:, 1:]
+
+    masks_tensor = masks_tensor[:, 1:] # Shift masks forward
+
+    return TensorDataset(inp_tensor, target_tensor, masks_tensor, props_tensor)
+
 
 def get_tensor_dataset(grammar_encodings, rule_masks, properties_array):
     """
     Adjusted function to include shifted masks for syntax-directed model training.
     """
 
-    grammar_tensor = torch.from_numpy(grammar_encodings).long()
+    grammar_tensor = torch.from_numpy(grammar_encodings).float()
     masks_tensor = torch.from_numpy(rule_masks).float()
     props_tensor = torch.from_numpy(properties_array).float()
 
@@ -63,7 +79,7 @@ def get_tensor_dataset(grammar_encodings, rule_masks, properties_array):
     # - This means that mask K is saying what is allowed at step k, and enc k is saying what was selected at step k
     # So we should consider prediction at k-1 to predict logits for step k, and use mask k to determine what is allowed
     
-    masks_tensor = masks_tensor[:, 1:]  # Not shifted masks [alternative is masks_tensor[:, :-1]]
+    masks_tensor = masks_tensor[:, 1:]  # Masks in line with targets (makes sense siunce should mask out logits for comparison with targets) [alternative is masks_tensor[:, :-1]]
 
     return TensorDataset(inp_tensor, target_tensor, masks_tensor, props_tensor)
 

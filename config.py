@@ -10,4 +10,4 @@ class CONFIG:
     info_folder = './grammar/'
     skip_deter = 0 # Skip deterministic position
     bondcompact = 0 # Compact ringbond or not
-    loss_type = 'perplexity' # Perplexity loss, other options is binary CE ('binary')
+    loss_type = 'binary' # TODO change back; Perplexity loss, other options is binary CE ('binary')

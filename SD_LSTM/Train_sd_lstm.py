@@ -19,7 +19,7 @@ if __name__ == '__main__':
                         help='Full path to SMILES file containing validation data')
     '''
 
-    parser.add_argument('--batch_size', default=50, type=int, help='Size of a mini-batch for gradient descent')
+    parser.add_argument('--batch_size', default=64, type=int, help='Size of a mini-batch for gradient descent')
     parser.add_argument('--valid_every', default=2, type=int, help='Validate every so many epochs')
     parser.add_argument('--print_every', default=200, type=int, help='Report every so many batches')
     parser.add_argument('--n_epochs', default=200, type=int, help='Number of training epochs') ## Originally this was 100
@@ -31,7 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=42, type=int, help='Random seed')
     #parser.add_argument('--prop_model', default="../../data/QM9/prior.pkl.gz", help='Saved model for properties distribution')
 
-    parser.add_argument('--output_dir', default='../models/SD_LSTM_QM9/', help='Output directory')
+    parser.add_argument('--output_dir', default='../models/SD_LSTM_QM9_BCE_2/', help='Output directory')
 
     args = parser.parse_args()
 
@@ -52,7 +52,8 @@ if __name__ == '__main__':
                                            rnn_dropout=args.rnn_dropout,
                                            lr=args.lr,
                                            valid_every=args.valid_every,
-                                           print_every=args.print_every)
+                                           print_every=args.print_every,
+                                           num_data_workers=4)
 
 
     trainer.train(args.data_path)  #LOUIS, training_set=args.train_data, validation_set = args.valid_data)

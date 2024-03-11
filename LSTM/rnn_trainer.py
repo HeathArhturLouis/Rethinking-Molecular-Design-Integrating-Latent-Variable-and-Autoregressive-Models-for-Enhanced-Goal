@@ -74,6 +74,9 @@ class SmilesRnnTrainer:
         # raise Exception('Delete me fam')
         
 
+        # inp is: 20x101 batch_size x max_seq_len
+        # properties is: 20x1 batch_size [property logP]
+
         output, hidden = self.model(inp, properties, hidden)
         output = output.view(output.size(0) * output.size(1), -1)
         loss = self.criteria[0](output, tgt.view(-1))

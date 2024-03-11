@@ -50,6 +50,9 @@ class ConditionalSmilesRnn(nn.Module):
                 nn.init.constant_(r_gate, 1)
 
     def forward(self, x, properties, hidden):
+        # inp is: 20x101 batch_size x max_seq_len
+        # properties is: 20x1 batch_size [property logP]
+        # input size is 47
         embeds = self.encoder(x)
         output, hidden = self.rnn(torch.cat((embeds, properties.unsqueeze(1).expand(-1,x.shape[1], -1)), -1), hidden)
         output = self.decoder(output)

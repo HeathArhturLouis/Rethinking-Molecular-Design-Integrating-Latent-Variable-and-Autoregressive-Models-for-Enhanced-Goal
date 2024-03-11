@@ -80,7 +80,6 @@ class OnehotBuilder(TreeWalker):
         return node.bond_idx
 
 class ConditionalDecoder(TreeWalker):
-
     def __init__(self, raw_logits, use_random):
         super(ConditionalDecoder, self).__init__()
         self.raw_logits = raw_logits

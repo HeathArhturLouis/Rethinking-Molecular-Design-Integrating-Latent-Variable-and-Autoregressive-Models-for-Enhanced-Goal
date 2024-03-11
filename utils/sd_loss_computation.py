@@ -16,18 +16,21 @@ class PerpCalculator(nn.Module):
         super(PerpCalculator, self).__init__()
     '''
     input:
+        target (int 65), loss (float32), output (float32)    [50, 99, 80]  seq_len x batch_size x decision_dim
+
         true_binary: one-hot, with size=time_steps x bsize x DECISION_DIM
         rule_masks: binary tensor, with size=time_steps x bsize x DECISION_DIM
         raw_logits: real tensor, with size=time_steps x bsize x DECISION_DIM
     '''
     def forward(self, true_binary, rule_masks, raw_logits):
+        true_binary = true_binary.float()
         if CONFIG.loss_type == 'binary':
             exp_pred = torch.exp(raw_logits) * rule_masks
 
             norm = F.torch.sum(exp_pred, 2, keepdim=True)
             prob = F.torch.div(exp_pred, norm)
 
-            return F.binary_cross_entropy(prob, true_binary) * CONFIG.max_decode_steps
+            return [F.binary_cross_entropy(prob, true_binary) * CONFIG.max_decode_steps]
 
         if CONFIG.loss_type == 'perplexity':
             return my_perp_loss(true_binary, rule_masks, raw_logits)
