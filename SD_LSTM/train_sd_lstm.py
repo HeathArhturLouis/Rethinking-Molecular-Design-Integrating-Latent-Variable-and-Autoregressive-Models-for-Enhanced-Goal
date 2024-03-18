@@ -1,6 +1,3 @@
-'''
-
-'''
 
 from sd_lstm_model import ConditionalSDLSTM
 import torch
@@ -16,7 +13,7 @@ from tqdm import tqdm
 
 sys.path.append('../utils/')
 from sd_lstm_utils import load_encodings_masks_and_properties, get_tensor_dataset, get_tensor_dataset_alt, save_model
-from sd_loss_computation import my_perp_loss
+from sd_loss_computation import my_perp_loss, my_binary_loss, PerpCalculator, masked_ce
 
 
 from haikunator import Haikunator
@@ -24,18 +21,30 @@ import json
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
+from torch.nn.utils import clip_grad_norm_
+
 
 class SD_LSTM_Trainer:
-    def __init__(self, train_data_loader, val_data_loader, model=None, device = 'cpu', batch_size = None, 
+    def __init__(self, train_x_enc, train_x_masks, train_y, valid_x_enc, valid_x_masks, valid_y, property_names,
+                 model=None, device = 'cpu', batch_size = None, 
                  hidden_size = 512, n_layers = 3, rnn_dropout = 0.2, learning_rate = 1e-3,
                  rules_dict_size = 80, max_seq_len = 100, 
                  model_save_dir = '../models/SD_LSTM_FR/', 
                  valid_every_n_epochs = 1, save_every_n_val_cycles = 3, max_epochs = 100):
+        
+        all_y = np.concatenate((train_y, valid_y), axis=0)
+
+        mean = np.mean(all_y, axis = 0)
+        std = np.std(all_y, axis = 0)
+
+        n_props = train_y.shape[-1] # Should be 1
 
         if model == None:
             self.model = ConditionalSDLSTM(input_size=rules_dict_size,
                 property_size=n_props,
                 property_names=property_names,
+                pnorm_means=mean,
+                pnorm_stds=std,
                 hidden_size=hidden_size,
                 output_size=rules_dict_size,
                 n_layers=n_layers,
@@ -45,9 +54,17 @@ class SD_LSTM_Trainer:
                 )
         else:
             self.model = model.to(device)
+
+        train_y = self.model.normalize_prop_scores(train_y)
+        valid_y = self.model.normalize_prop_scores(valid_y)
         
-        self.train_data_loader = train_data_loader
-        self.val_data_loader = val_data_loader
+        train_set = get_tensor_dataset(train_x_enc, train_x_masks, train_y)
+        valid_set = get_tensor_dataset(valid_x_enc, valid_x_masks, valid_y)
+
+        self.train_data_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+        self.val_data_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True)
+
+        # TODO: MAke sure this works
         self.device = device
         self.batch_size = batch_size
         self.hidden_size = hidden_size
@@ -59,7 +76,9 @@ class SD_LSTM_Trainer:
         self.save_every_n_val_cycles = save_every_n_val_cycles
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.loss_fnct = my_perp_loss
+
+        self.loss_fnct = masked_ce
+
         self.max_epochs = max_epochs
 
         self.train_losses = []
@@ -73,7 +92,6 @@ class SD_LSTM_Trainer:
             self.batch_size = batch_size
 
         os.makedirs(self.model_save_dir, exist_ok=True)
-
 
         # self.lr_scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.5, patience=5, min_lr=0.001)
 
@@ -108,7 +126,7 @@ class SD_LSTM_Trainer:
             'rules_dict_size': self.model.input_size,  # Assuming input_size is accessible in your model
             'max_seq_len': self.model.max_rules,  # Assuming max_rules corresponds to max sequence length in your model
             'valid_every_n_epochs': self.valid_every_n_epochs,
-            'save_every_n_val_cycles': self.save_every_n_val_cycles,
+            'save_every_n_val_cycles': self.save_every_n_val_cycles
         }
         
         # Write the parameters dictionary to a JSON file
@@ -127,9 +145,7 @@ class SD_LSTM_Trainer:
 
         self.save_params(run_name=run_id)
 
-
         print(f'Training run ID: {run_id}')
-
 
         best_val_loss = np.inf
         # Save training parameters
@@ -190,12 +206,14 @@ class SD_LSTM_Trainer:
             # tgt is shifted by 1 forwards inputs: batch x (max_seq_len - 1) x decision_dim 
             
             # Compute loss : TODO: Reorder dimensions? 
-            batch_loss = self.loss_fnct(tgt, mask, output_logits) / data_loader.batch_size
+
+            batch_loss = self.loss_fnct(tgt, mask, output_logits)[0] # This is not neccesary/ data_loader.batch_size
 
             # We therefore expect batch_loss to be of dim batch_size x 1
             if phase == 'train':
                 self.optimizer.zero_grad()
                 batch_loss.backward()
+
                 self.optimizer.step()
 
             # Detach batch loss to save memory
@@ -226,7 +244,6 @@ class SD_LSTM_Trainer:
         return avg_loss
 
 
-
 if __name__ == "__main__":
         data_path = '../data/QM9/'
         rules_dict_size = 80
@@ -237,36 +254,24 @@ if __name__ == "__main__":
         rules_dict_size = rules_dict_size
         n_layers = 3
         rnn_dropout = 0.2
-        
-        batch_size = 300
-
+        batch_size = 64
         learning_rate = 1e-3
 
         # Load Property Data and Masks and create splits
         property_names, train_x_enc, train_x_masks, train_y, valid_x_enc, valid_x_masks, valid_y = load_encodings_masks_and_properties(data_path)
-        n_props = len(property_names)
 
-        all_y = np.concatenate((train_y, valid_y), axis=0)
-        mean = np.mean(all_y, axis = 0)
-        std = np.std(all_y, axis = 0)
+        trainer = SD_LSTM_Trainer(train_x_enc=train_x_enc,
+                                train_x_masks=train_x_masks,
+                                train_y=train_y,
+                                valid_x_enc=valid_x_enc,
+                                valid_x_masks=valid_x_masks,
+                                valid_y=valid_y,
+                                property_names=property_names,
+                                model_save_dir='../models/SD_LSTM_QM9_MASKED_CROSS_ENTROPY_TOKENS',
+                                n_layers=n_layers,
+                                batch_size=batch_size)
 
-        train_y = (train_y - mean) / std
-        valid_y = (valid_y - mean) / std
-        
-        train_set = get_tensor_dataset_alt(train_x_enc, train_x_masks, train_y)
-        valid_set = get_tensor_dataset_alt(valid_x_enc, valid_x_masks, valid_y)
+        # Save some memory in case we're running on CPU, delete external refs to dead objects
+        del train_x_enc, train_x_masks, valid_x_enc, valid_x_masks, train_y, valid_y
 
-        max_rules = train_x_enc.shape[1] # def 100
-        rules_dict_size = train_x_enc.shape[2] # def 80
-
-        #TODO: figure out something with batch size so we aren't passing the param twice
-
-        train_data_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-        val_data_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=True)
-
-        # Save some memory in case we're running on CPU
-        del train_set, valid_set, train_x_enc, train_x_masks, valid_x_enc, valid_x_masks, train_y, valid_y
-
-        trainer = SD_LSTM_Trainer(train_data_loader = train_data_loader, val_data_loader = val_data_loader, n_layers=1, batch_size=32)
         trainer.fit()
-        

@@ -29,7 +29,6 @@ sys.path.append('../utils/')
 from property_calculator import PropertyCalculator
 
 
-
 class SmilesRnnTrainer:
     def __init__(self,normalizer_mean,normalizer_std, model, criteria, optimizer, device, prop_names, log_dir=None, clip_gradients=True) -> None:
         self.model = model.to(device)

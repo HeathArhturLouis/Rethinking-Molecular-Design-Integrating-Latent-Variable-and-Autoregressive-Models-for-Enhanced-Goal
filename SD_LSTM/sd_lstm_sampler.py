@@ -9,207 +9,242 @@ import torch.nn.functional as F
 from sd_lstm_model import ConditionalSDLSTM
 from sd_lstm_utils import load_model
 
+from torch import nn
+
 import sys
 import os
 sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)) , '../utils'))
 from sd_smiles_decoder import raw_logit_to_smiles
 
+from torch.distributions import Categorical
+
+from tree_walker import ConditionalDecoder
+from attribute_tree_generator import create_sequential_tree_decoder, FETCH_TOKEN, RETURN_TOKEN
+
+from mol_tree import Node, get_smiles_from_tree
+
+
+FAILED_TO_TERM_ERR_STR = 'ERROR-STILL-DECODING'
+FAILED_TO_DECODE_ERR_STR = 'ERROR-FAILED-TO-CONSTRUCT-SMILE'
 
 class SDLSTMSampler:
-    def __init__(self, batch_size, device, rules_dict_size):
+    def __init__(self, batch_size, device, rules_dict_size, distribution_cls = Categorical):
         self.batch_size = batch_size
         self.device = device
         self.rules_dict_size = rules_dict_size
-
-    '''
-    def sample_batch_constrained(self, model, max_rules, property_values):
-        # Autoregressively sample a batch of smiles enforcing rule validity at each step 
-        # model: SDLSTM model
-        # max_rules: maximum number of grammar rules (sequence length before SMILES decoding)
-        # property_values: torch.Tensor( [list of property values])
-        
-        model.eval()
-        torch.no_grad()
-
-        model = model.to(self.device)
-        max_rules -= 1
-
-        initial_input = torch.zeros(self.batch_size, 1, self.rules_dict_size).to(self.device)
-        initial_input[:, 0, 0] = 1
-
-        properties = property_values.repeat(self.batch_size, 1).to(self.device)
-        hidden = model.init_hidden(self.batch_size, self.device)
-
-        rules_list = []
-        logits_list = []
-        current_input = initial_input
-
-        for _ in range(max_rules):
-            # Get logits for next step
-            
-            # Logits shape is torch.Size([64, _, 80]), next char logits are final index
-            logits, hidden = model(current_input, properties, hidden)
-
-            # Final index is logits for next step
-            next_step_logits = logits[:, -1, :]
-
-            walker = ConditionalDecoder(np.squeeze(pred_logits), use_random)
-
-            # Check validity
+        self.distribution_cls = distribution_cls
 
 
-    for i in range(raw_logits.shape[1]):
-        pred_logits = raw_logits[:, i, :]
-        walker = ConditionalDecoder(np.squeeze(pred_logits), use_random)
-        new_t = Node('smiles')
-        try:
-            tree_decoder = create_tree_decoder()
-            tree_decoder.decode(new_t, walker)
-            sampled = get_smiles_from_tree(new_t)
-            
-        except Exception as ex:
-            if not type(ex).__name__ == 'DecodingLimitExceeded':
-                print('Warning, decoder failed with', ex)
+    def pad_one_hots(self, one_hots, max_rules):
+        padding_length = max_rules - one_hots.shape[0]
+        if padding_length > 0:
+                # Create a one-hot encoded vector for the padding token
+            padding_vector = np.zeros((1, one_hots.shape[1]), dtype=np.float32)  # Initialize with zeros
+            padding_vector[0, model.rules_dict_size - 1] = 1  # Set the appropriate index for the padding token to 1
 
-            # failed. output None
-            sampled = None
- 
-        if sampled is None:
-            continue
-        
-        # we generated a good one
-        generations.append(sampled)
+            # Create a padding array with the desired padding length
+            padding_array = np.tile(padding_vector, (padding_length, 1))  # Repeat the padding vector
+
+            # Append the padding array to the original sequence of one-hots
+            padded_one_hots = np.concatenate((one_hots, padding_array), axis=0)
+            return padded_one_hots
+        else:
+            return one_hots
 
 
-            # logits_list.append(logits[:, -1:, :])
-
-            print()
-            print()
-            print(logits.shape)
-            print(logits)
-            print()
-            print()
-            print(logits_list)
-
-            return
-            # Check validity and 
-            
-            # Construct next input
-            current_input = logits[:, -1:, :]
-
-        # Concatenate the logits from each timestep to form the sequence
-        raw_logits = torch.cat(logits_list, dim=1)
-    '''
-
-
-    def sample_batch_unconstrained_logits(self, model, max_rules, property_values):
+    def sample_batch_masking_smiles(self, model, max_rules, property_val):
         '''
-        Autoregressively sample a batch of logits from the model without enforcing rule validity at each step.
-
-        device: string device ('cpu' | 'gpu')
-        Properties: torch.Tensor([List of pvals for all generations) or torch.Tensor(single prop value to be repeated)
-        batch_size: size of batch to sample
+        Sample a batch of smiles with property values described in property_val. If max_decoding limit reached without
+        termination return ERROR instead of that smiles
+        
+        - model : model
+        - max_rules : int max decoding steps
+        - property_val : torch.Tensor of shape num_to_sample x num_props containing properties 
+        return smiles (arr str containing sampled smiles)
         '''
+        assert len(property_val.shape) == 2 and property_val.shape[1] == model.property_size
 
+
+        # Set model to evaluation mode
         model.eval()
         with torch.no_grad():
-            # TODO: Repeat for number of samples
+            # Infer batch size
+            b_size = property_val.shape[0]
+
+            # Initialize model inputs and send to device
             model = model.to(self.device)
-
-            # We will set the initial token
-            max_rules -= 1
-
-            # Prepare initial inputs: using zeros as initial inputs
-            initial_input = torch.zeros(self.batch_size, max_rules, self.rules_dict_size).to(self.device)
-
-            # Set first index to initial token
-            initial_input[:, 0, 0] = 1
+            property_values = torch.Tensor(property_val).to(self.device)
+            hidden = model.init_hidden(b_size , self.device)
+            # Current input for model
             
-            # Create properties array
-            if  property_values.shape[0] == 1:
-                properties = property_values.repeat(self.batch_size, 1).to(self.device)
+            # Initialize a tensor of zeros with the shape [b_size, model.rules_dict_size]
+            current_input = torch.zeros([b_size, 1 , model.rules_dict_size], dtype=torch.float, device=self.device)
+
+            # Set the first element of each row in current_input to 1
+            current_input[:, 0] = 1
+            
+            # Array fo walkers, one for each element of batch_size
+            still_executing = [True] * b_size
+            walkers = []
+            root_nodes = []
+            dec_generators = []
+            for _ in range(b_size):
+                # INIT WALKERS
+                onehot_start = torch.zeros(1, model.rules_dict_size)
+                onehot_start[0][0] = 1
+                new_walker = ConditionalDecoder(onehot_start, use_random=False)
+                walkers.append(new_walker)
+                new_node = Node('smiles')
+                root_nodes.append(new_node)
+                tree_decoder = create_sequential_tree_decoder()
+                dec_gen = tree_decoder.decode(new_node, new_walker)
+                # Burn initial logit / input
+                fmsk, frsp = next(dec_gen)
+                dec_generators.append(dec_gen)
+                # TODO: Remove this once I'm confident it's working properly
+                assert frsp == FETCH_TOKEN and fmsk == [0]
+
+            # TODO: Remove Debugging code
+            tokens = [[] for _ in range(b_size)]
+
+            for rindex in range(max_rules):
+                '''
+                PROCESS:
+                1. Next to get next mask
+                2. Compute logits, mask them and add them to the walker
+                3. Continue execution
+                '''
+                logits, hidden = model(current_input, property_values, hidden)
+                # Fetch Next Mask
+                # Fetch next masks
+                for ind in range(b_size):
+                    if not still_executing[ind]:
+                        # Already finished executing
+                        continue
+                    # Get mask and check still running
+                    
+                    # TODO: Remove debugging code
+                    # print(tokens[ind])
+
+                    mind, resp = next(dec_generators[ind])
+                    if resp == RETURN_TOKEN:
+                        still_executing[ind] = False
+                        # We've just finished, no need to sample any more
+                        continue
+
+                    mask = torch.zeros(model.rules_dict_size, dtype=torch.bool)
+                    mask[mind] = True
+                    cur_step_logits = logits[ind][0]
+                    # Logits at step nexst index
+                    cur_step_logits[~mask] = float('-inf')
+
+                    # Compute probabilities
+                    cur_exped = np.exp(cur_step_logits - cur_step_logits.max())
+                    cur_prob = cur_exped / (cur_exped.sum() + 1e-8)
+
+                    distribution = self.distribution_cls(probs=cur_prob)
+                    new_tok = distribution.sample().item()
+                    new_log = torch.zeros(1, model.rules_dict_size)
+                    new_log[0][new_tok] = 1
+
+                    walkers[ind].raw_logits = np.append(walkers[ind].raw_logits, new_log, axis=0)
+
+                    current_input[ind] = new_log.clone().detach()
+                    
+                    # TODO: REMOVE DEBUGGING CODE
+                    # tokens[ind].append(new_tok)
+
+
+        smiles = []
+        # Compute smiles
+        for ind in range(b_size):
+            # If hasn't finished decoding, set to error
+            if still_executing[ind]:
+                smiles.append(FAILED_TO_TERM_ERR_STR)
             else:
-                assert property_values.shape[0] == self.batch_size 
-            
+                try:
+                    smiles.append(get_smiles_from_tree(root_nodes[ind]))
+                except:
+                    smiles.append(FAILED_TO_DECODE_ERR_STR)
+        return smiles
 
-            hidden = model.init_hidden(self.batch_size, self.device)
-
-            # Forward pass to generate raw logits
-            # Since your model expects inputs at each step, you can loop through the sequence length,
-            # feeding the output back as input at each step
-            logits_list = []
-
-            current_input = initial_input
-
-            for _ in range(max_rules):
-                logits, hidden = model(current_input, properties, hidden)  # Forward pass
-                logits_list.append(logits[:, -1:, :])  # Append the last timestep's logits
-
-                # Prepare the next input
-                # Here, you might want to apply some sampling strategy to convert logits to discrete tokens if necessary
-                # For simplicity, we're using the logits directly as the next input
-                current_input = logits[:, -1:, :]
-
-            # Concatenate the logits from each timestep to form the sequence
-            raw_logits = torch.cat(logits_list, dim=1)
-
-            return raw_logits.detach()
-
-
-    def sample_batch_unconstrained_smiles(self, model, max_rules, property_values, quiet=False):
+    def sample(self, model, properties, num_to_sample, max_seq_len, quiet=True):
         '''
-        Generate logits autoregressively, then enforce constraints during parse time
-
-        Return:
-        One batch of smiles strings
+        Interface for evaluation code
         '''
-        logits = self.sample_batch_unconstrained_logits(model = model, max_rules = max_rules, property_values = property_values)
-        # input expected to be array
-        return raw_logit_to_smiles(np.array(logits.permute(1, 0, 2)), use_random=True, quiet=quiet)
+        assert properties.shape[0] == num_to_sample
 
+        properties = model.normalize_prop_scores(properties)
 
-    def sample(self, model, properties, num_to_sample, max_seq_len, mode='UNC', quiet=True, force = False):
-        '''
-        mode : 'UNC' for unconstrained logit generation OR 'CONST' for constrained sequential generation
-        properties : torch.Tensor[[prop_value to be repeated]] or torch.Tensor([[properties] * num_to_sample])
-        Wrapper function for compatibility with vanilla ConditionalLSTM sampler
-        '''
-        assert mode in ['UNC', 'CONST']
+        smiles = []  # finished smiles
+        num_batches = (num_to_sample + self.batch_size - 1) // self.batch_size
 
-        if mode == 'CONST':
-            raise Exception('Constrained sampling not implemented. you should implement it TODO:')
-
-        if not force:
-            n_batches = math.ceil(num_to_sample / self.batch_size)
-            smiles = []
-            # for batch in range(n_batches):
-            for i in range(n_batches):
-                smiles += self.sample_batch_unconstrained_smiles(model=model, max_rules = max_seq_len, property_values=properties[0], quiet=quiet)
+        if quiet:
+            itr = range(num_batches)
         else:
-            smiles = []
-            while len(smiles) < num_to_sample:
-                smiles += self.sample_batch_unconstrained_smiles(model=model, max_rules = max_seq_len, property_values=properties[0], quiet=quiet)
+            itr = tqdm(range(num_batches))
 
-        return smiles[:num_to_sample]
+        for batch_idx in itr:
+            start_idx = batch_idx * self.batch_size
+            end_idx = min((batch_idx + 1) * self.batch_size, num_to_sample)
 
+            properties_batch = properties[start_idx:end_idx]
+            batch_smiles = self.sample_batch_masking_smiles(model, max_seq_len, properties_batch)
+            smiles.extend(batch_smiles)
+
+        return smiles
+
+from rdkit import Chem
+from tqdm import tqdm
+
+import sys
+sys.path.append('../utils/')
+from property_calculator import PropertyCalculator
+pc = PropertyCalculator(['LogP'])
+
+def props_from_smiles(smiles_list, verbose=True):
+    '''
+    Computes property scores of all valid smiles and returns as list
+    '''
+    if verbose:
+        smiles_list = tqdm(smiles_list)
+    props = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is not None:
+            props.append(pc(mol)[0])
+    return props
 
 
 if __name__ == '__main__':
-    model_weights = '../models/SD_LSTM_QM9_BCE/batch_size_64_1/LSTM_40_1.489.pt'
-    model_definit = '../models/SD_LSTM_QM9_BCE/batch_size_64_1/LSTM_40_1.489.json'
+    # model_weights = '../models/SD_LSTM_FR/SD_LSTM_silent-queen-29_Epoch_5_Vl_0.123.pt'
+    # model_definit = '../models/SD_LSTM_FR/SD_LSTM_silent-queen-29_Epoch_5_Vl_0.123.json'
+    model_weights = '../models/SD_LSTM_QM9_MASKED_CROSS_ENTROPY_TOKENS/SD_LSTM_dark-hall-89_Epoch_20_Vl_0.201.pt'
+    model_definit = '../models/SD_LSTM_QM9_MASKED_CROSS_ENTROPY_TOKENS/SD_LSTM_dark-hall-89_Epoch_20_Vl_0.201.json'
 
-    sampler = SDLSTMSampler(batch_size = 64, device = 'cpu', rules_dict_size = 80)
-
+    sampler = SDLSTMSampler(batch_size = 128, device = 'cpu', rules_dict_size = 80)
     model = load_model(model_definit, model_weights, device='cpu')
 
-    print(sampler.sample( model=model, num_to_sample=100,  properties= torch.Tensor([[2.5] for _ in range(100)]),max_seq_len=100 ))
+    max_rules = 100
+    property_val = -3
 
-    #print(sampler.sample_batch_unconstrained_logits(model=model, max_rules=100, property_values=torch.Tensor([1.0])))
-    # print(sampler.sample(model=model, num_to_sample = 100, properties=torch.Tensor([[1], [0]]), max_seq_len = 100))
+    n_props = 100
+    import random
+    # random.uniform(-3, 3)
+    properties = torch.tensor([[property_val] for _ in range(n_props)])
+    properties = properties.to(torch.float32)
 
-    #TODO: Test if max_seq_len is negotiable
-    # sample = sampler.sample(model=model, properties=torch.Tensor([[1.0]]), num_to_sample=100, max_seq_len=100)
-    # print(len(sample))
-    # print(sample)
+    smiles = sampler.sample(model, properties, n_props, 100 + 50, quiet=False)
+    # Print non terminated
+    non_termed = smiles.count(FAILED_TO_TERM_ERR_STR)
+    print(f'Didnt terminate: {non_termed}')
+    # Print other error
+    failed_decode = smiles.count(FAILED_TO_DECODE_ERR_STR)
+    print(f'Failed to decode: {failed_decode}')
 
-    # This strategy creates all the same molecule ... use_random set to true causes errors ...
+    unique_pct = len(set(smiles)) / len(smiles)
+    print(f'Unique PCT {unique_pct}')
+
+    calprops = props_from_smiles(smiles)
+    avg_prop = np.mean(calprops)
+    print(f'{avg_prop} target: {property_val}')

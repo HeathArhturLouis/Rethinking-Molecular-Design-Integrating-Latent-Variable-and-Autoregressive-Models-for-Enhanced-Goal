@@ -1,19 +1,16 @@
 import torch
 import torch.nn as nn
 
-# import sys
-# sys.path.append('../utils')
-# Makes more sense for the training function to instantiate this
-# from sd_loss_computation import PerpCalculator
 
 class ConditionalSDLSTM(nn.Module):
-    def __init__(self, input_size, property_size, property_names, hidden_size, output_size, n_layers, rnn_dropout, max_rules, rules_dict_size) -> None:
+    def __init__(self, input_size, property_size, property_names, pnorm_means, pnorm_stds, 
+                hidden_size, output_size, n_layers, rnn_dropout, max_rules, rules_dict_size) -> None:
         """
         LSTM model for training on masked grammar encodings as in SD-VAE. Works like the regular CLSTM model
         but holds and records SDLSTM related parameters
 
         Args:
-            max_rules: Maximum no rules to appy
+            max_rules: Maximum no rules to apply
             rules_dict_size: Length of one hots for encodings, input size
             property_size: number of molecule properties
             hidden_size: number of hidden units
@@ -32,26 +29,47 @@ class ConditionalSDLSTM(nn.Module):
         self.n_layers = n_layers
         self.rnn_dropout = rnn_dropout
         self.property_names = property_names
+        self.pnorm_means = pnorm_means
+        self.pnorm_stds = pnorm_stds
+
 
         # Model originally expected input to be tensors of SMILES tokens (ints) and embedded them before passing to hiden
         # Since we are working with one hot vectors, we can replace this with a linear layer of the approp dimensionality 
 
         # LOUIS: TODO: OLD
-        # self.encoder = nn.Embedding(input_size, hidden_size)
-        self.linear = nn.Linear(input_size, hidden_size)
+        self.encoder = nn.Embedding(input_size, hidden_size)
+        # self.linear = nn.Linear(input_size, hidden_size)
 
         self.decoder = nn.Linear(hidden_size, output_size)
         self.rnn = nn.LSTM(input_size=(hidden_size + property_size), hidden_size=(hidden_size), batch_first=True, num_layers=n_layers, dropout=rnn_dropout)
         
+        # ???? TODO: What does this do?
         self.init_weights()
 
+    def normalize_prop_scores(self, properties):
+        '''
+        Auxiliary function to be used by trainer/sampler class
+        properties is torch.tensor of size num_scores x num_properties
+
+        returns normalized properties
+        '''
+        assert properties.shape[-1] == self.property_size
+
+
+        for i in range(self.property_size):
+            # Apply ith index of self.pnorm_means and self.pnorm_stds to normalize every ith element of the 
+            # num_properties dimension of properties
+            properties[:, i] -= self.pnorm_means[i]
+            properties[:, i] /= self.pnorm_stds[i]
+        
+        return properties
 
 
     def init_weights(self):
         # encoder / decoder
         # LOUIS: TODO: OLD
-        nn.init.xavier_uniform_(self.linear.weight)
-        # nn.init.xavier_uniform_(self.encoder.weight)
+        # nn.init.xavier_uniform_(self.linear.weight)
+        nn.init.xavier_uniform_(self.encoder.weight)
 
         nn.init.xavier_uniform_(self.decoder.weight)
         nn.init.constant_(self.decoder.bias, 0)
@@ -68,10 +86,15 @@ class ConditionalSDLSTM(nn.Module):
                 nn.init.constant_(r_gate, 1)
 
     def forward(self, x, properties, hidden):
+        # Get indecies
+        indices = torch.argmax(x, dim=-1)
         # LOUIS: TODO: REMOVE
-        # embeds = self.encoder(x)
-        embeds = self.linear(x)
-        output, hidden = self.rnn(torch.cat((embeds, properties.unsqueeze(1).expand(-1, x.shape[1], -1)), -1), hidden)
+        embeds = self.encoder(indices)
+        # embeds = self.linear(x)
+
+        inputs = torch.cat((embeds, properties.unsqueeze(1).expand(-1, x.shape[1], -1)), -1)
+
+        output, hidden = self.rnn(inputs, hidden)
         output = self.decoder(output)
         return output, hidden
 
@@ -91,5 +114,7 @@ class ConditionalSDLSTM(nn.Module):
                     n_layers=self.n_layers,
                     rnn_dropout=self.rnn_dropout,
                     max_rules=self.max_rules,
-                    rules_dict_size=self.rules_dict_size)
-
+                    rules_dict_size=self.rules_dict_size,
+                    pnorm_means=list(self.pnorm_means),
+                    pnorm_stds=list(self.pnorm_stds)
+                    )
