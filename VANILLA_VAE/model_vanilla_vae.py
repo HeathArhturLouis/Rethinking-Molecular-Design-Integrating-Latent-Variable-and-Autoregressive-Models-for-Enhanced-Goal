@@ -160,10 +160,11 @@ class VanillaMolVAE(nn.Module):
                     property_names=list(self.property_names),
                     decoder_embedding_dim=self.decoder_embedding_dim,
                     device=self.device,
-                    # TODO: FIX THIS SO IT PASSES ARG
+                    # TODO: Make configurable
                     # padding_token=self.padding_token,
+                    
                     reparam=self.reparam,
-                    decoder_mod_type=self.decoder_mod_type)
+                    decoder_mod_type=self.decoder_mode_type)
 
 
 # encoder and decoder

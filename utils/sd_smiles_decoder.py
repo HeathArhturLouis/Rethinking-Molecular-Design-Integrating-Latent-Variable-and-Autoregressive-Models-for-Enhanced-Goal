@@ -8,7 +8,7 @@ from tree_walker import ConditionalDecoder
 from attribute_tree_decoder import create_tree_decoder
 import sascorer
 
-def raw_logit_to_smiles(raw_logits, use_random = False, quiet=False):
+def raw_logit_to_smiles(raw_logits, use_random = False, quiet=False, label_junk=True):
     '''
     Input format:
         raw_logits - [timesteps, batchsize, prediction_dimension]
@@ -40,7 +40,10 @@ def raw_logit_to_smiles(raw_logits, use_random = False, quiet=False):
                 print('Warning, decoder failed with', ex)
 
             # failed. output None
-            sampled = None
+            if label_junk:
+                sampled = "JUNK_FAILED_DECODE"
+            else:
+                sampled = None
  
         if sampled is None:
             continue
