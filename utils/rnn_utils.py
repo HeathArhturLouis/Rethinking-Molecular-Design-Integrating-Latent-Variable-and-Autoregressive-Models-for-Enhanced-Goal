@@ -10,7 +10,7 @@ from guacamol.utils.data import remove_duplicates
 from torch.utils.data import TensorDataset
 
 
-from rnn_model import ConditionalSmilesRnn
+# from rnn_model import ConditionalSmilesRnn
 
 import pandas as pd
 import os
@@ -78,10 +78,10 @@ def load_model(model_class, model_definition, model_weights, device, copy_to_cpu
     model.load_state_dict(torch.load(model_weights, map_location))
     return model.to(device)
 
-
+'''
 def load_rnn_model(model_definition, model_weights, device, copy_to_cpu=True):
     return load_model(ConditionalSmilesRnn, model_definition, model_weights, device, copy_to_cpu)
-
+'''
 
 def save_model(model, base_dir, base_name):
     model_params = os.path.join(base_dir, base_name + '.pt')
@@ -129,6 +129,90 @@ def load_smiles_and_properties(data_path,
 
     return property_list, train_x, train_y, valid_x, valid_y
 
+
+'''
+def load_smiles_and_properties(smiles_file, rm_invalid=True, rm_duplicates=False, max_len=100):
+    # Load a saved list of smiles and associated precomputed properties. LOUIS: npy vs npz
+    smiles_list, properties = np.load(smiles_file, allow_pickle=True).values()
+    smiles, _ = load_smiles_from_list(smiles_list, rm_invalid=rm_invalid, rm_duplicates=rm_duplicates, max_len=max_len)
+    return smiles, properties
+'''
+
+'''
+def load_smiles_from_file(smiles_path, rm_invalid=True, rm_duplicates=True, max_len=100):
+    
+    Given a list of SMILES strings, provides a zero padded NumPy array
+    with their index representation. Sequences longer than `max_len` are
+    discarded. The final array will have dimension (all_valid_smiles, max_len+2)
+    as a beginning and end of sequence tokens are added to each string.
+
+    Args:
+        smiles_path: a text file with one SMILES string per line
+        max_len: dimension 1 of returned array, sequences will be padded
+
+    Returns:
+        sequences:list a numpy array of SMILES character indices
+        valid_mask: list of len(smiles_list) - a boolean mask vector indicating if each index maps to a valid smiles
+    
+    smiles_list = open(smiles_path).readlines()
+    return load_smiles_from_list(smiles_list, rm_invalid=rm_invalid, rm_duplicates=rm_duplicates, max_len=max_len)
+'''
+
+'''
+def load_smiles_from_list(smiles_list, rm_invalid=True, rm_duplicates=True, max_len=100):
+    
+    #Given a list of SMILES strings, provides a zero padded NumPy array
+    #with their index representation. Sequences longer than `max_len` are
+    #discarded. The final array will have dimension (all_valid_smiles, max_len+2)
+    #as a beginning and end of sequence tokens are added to each string.
+
+    #Args:
+    #    smiles_list: a list of SMILES strings
+    #    rm_invalid: bool if True remove invalid smiles from final output. Note that if True the length of the output
+    #      does not
+    #      equal the size of the input  `smiles_list`. Default True
+    #    rm_duplicates: bool if True return remove duplicates from final output. Note that if True the length of the
+    #      output does not equal the size of the input  `smiles_list`. Default True
+    #    max_len: dimension 1 of returned array, sequences will be padded
+
+    #Returns:
+    #    sequences:list a numpy array of SMILES character indices
+    #    valid_mask: list of len(smiles_list) - a boolean mask vector indicating if each index maps to a valid smiles
+
+    sd = SmilesCharDictionary()
+
+    # filter valid smiles strings
+    valid_smiles = []
+    valid_mask = [False] * len(smiles_list)
+    for i, s in enumerate(smiles_list):
+        s = s.strip()
+        if sd.allowed(s) and len(s) <= max_len:
+            valid_smiles.append(s)
+            valid_mask[i] = True
+        else:
+            if not rm_invalid:
+                valid_smiles.append('C')  # default placeholder
+    
+    
+    if rm_duplicates:
+        unique_smiles = remove_duplicates(valid_smiles)
+       
+    else:
+        unique_smiles = valid_smiles
+
+    # max len + two chars for start token 'Q' and stop token '\n'
+    max_seq_len = max_len + 2
+
+    # allocate the zero matrix to be filled
+    sequences = np.zeros((len(unique_smiles), max_seq_len), dtype=np.int32)
+
+    for i, mol in enumerate(unique_smiles):
+        enc_smi = sd.BEGIN + sd.encode(mol) + sd.END
+        for c in range(len(enc_smi)):
+            sequences[i, c] = sd.char_idx[enc_smi[c]]
+
+    return sequences, valid_mask
+'''
 
 def rnn_start_token_vector(batch_size, device='cpu'):
     """

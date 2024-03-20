@@ -33,6 +33,8 @@ def masked_ce(true_one_hots, mask, logits, use_mask=True):
     return [CE_CAL(logits, true_tokens)]
 
 
+
+
 class PerpCalculator(nn.Module):
     def __init__(self, loss_type = None):
         super(PerpCalculator, self).__init__()

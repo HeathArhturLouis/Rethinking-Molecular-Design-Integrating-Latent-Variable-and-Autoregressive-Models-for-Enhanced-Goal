@@ -108,7 +108,7 @@ class ConditionalSDLSTM(nn.Module):
         return dict(
                     input_size = self.input_size,
                     property_size=self.property_size,
-                    property_names= self.property_names,
+                    property_names=list(self.property_names),
                     hidden_size=self.hidden_size,
                     output_size=self.output_size,
                     n_layers=self.n_layers,
