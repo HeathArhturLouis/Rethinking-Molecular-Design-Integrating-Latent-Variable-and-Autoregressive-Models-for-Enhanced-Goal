@@ -19,7 +19,7 @@ if __name__ == '__main__':
                         help='Full path to SMILES file containing validation data')
     '''
 
-    parser.add_argument('--batch_size', default=20, type=int, help='Size of a mini-batch for gradient descent')
+    parser.add_argument('--batch_size', default=64, type=int, help='Size of a mini-batch for gradient descent')
     parser.add_argument('--valid_every', default=1000, type=int, help='Validate every so many batches')
     parser.add_argument('--print_every', default=100, type=int, help='Report every so many batches')
     parser.add_argument('--n_epochs', default=200, type=int, help='Number of training epochs') ## Originally this was 100

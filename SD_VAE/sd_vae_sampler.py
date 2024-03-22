@@ -27,7 +27,7 @@ sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), '../'))
 GRAMMAR_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), '../grammar/mol_zinc.grammar')
 
 
-class VanillaVAEHarness:
+class SDVAESampler:
     def __init__(self, batch_size, device):
         self.batch_size = batch_size
         self.device = device
@@ -106,16 +106,20 @@ class VanillaVAEHarness:
 
             out_logits = model.state_decoder(z, target_props)
 
-        # out tokens is shape seq_len x batch_size
+        # Out logits is seq_len x batch_size x decision_dim
+        
+        prepend_tensor = torch.tensor([[1.0] + [0.0] * 79], device=self.device).unsqueeze(0).repeat(1, out_logits.shape[1], 1)
+        # 1 x b_size x d_dim
 
-        # out_smiles = self.sd.matrix_to_smiles(out_tokens)
+        out_logits = torch.cat((prepend_tensor, out_logits), dim=0)
+
         out_smiles = raw_logit_to_smiles(out_logits, use_random = False) # Sample most probable at each step
         # Return Accuracy / Junk
 
         return out_smiles
         # return self.cal_accuracy(out_smiles, input_smiles)
 
-    def _sample_prior_unbatched(self, model, properties, use_random=True):
+    def _sample_prior_unbatched(self, model, properties, use_random):
         '''
         Sample random points in the prior with given properties n_to_sample times
         This is the strategy applied in the SD VAE code (fixed test props and random sampled z's)
@@ -131,9 +135,17 @@ class VanillaVAEHarness:
         model.eval()
 
         with torch.no_grad():
-            raw_logits = np.array(model.state_decoder(latent_points, properties)) # .permute(1, 0, 2)
+            raw_logits = torch.tensor(model.state_decoder(latent_points, properties)) # .permute(1, 0, 2)
 
         # Raw logits is size max_seq_len x batch_size x decision dim
+        prepend_tensor = torch.tensor([[1.0] + [0.0] * 79], device=self.device).unsqueeze(0).repeat(1, raw_logits.shape[1], 1)
+
+
+        raw_logits = torch.cat((prepend_tensor, raw_logits), dim=0)
+
+        #TODO: Reconversion Ugly hack
+        raw_logits = np.array(raw_logits)
+
         out_smiles = raw_logit_to_smiles(raw_logits, use_random = use_random)
         
         return out_smiles
@@ -214,18 +226,20 @@ def benchmark_reconstruction_QM9(model, sampler):
 
 
 if __name__ == '__main__':
-    model_weights = '../models/SD_VAE_MASKED_BIN_CE/SD_LSTM_lively-smoke-48_Epoch_12_Vl_0.134.pt'
-    model_definit = '../models/SD_VAE_MASKED_BIN_CE/SD_LSTM_lively-smoke-48_Epoch_12_Vl_0.134.json'
+    model_weights = '../models/SD_VAE_MASKED_BIN_CE/SD_LSTM_shiny-shape-08_Epoch_68_Vl_0.056.pt'
+    model_definit = '../models/SD_VAE_MASKED_BIN_CE/SD_LSTM_shiny-shape-08_Epoch_68_Vl_0.056.json'
 
-    sampler = VanillaVAEHarness(batch_size=64, device='cpu')
+    sampler = SDVAESampler(batch_size=64, device='cpu')
     model = load_model(model_class=SDVAE, model_definition=model_definit, model_weights=model_weights, device='cpu')
 
 
     # benchmark_reconstruction_QM9(model, sampler)
 
 
+    
     properties = torch.tensor([[1.0] for _ in range(100)], dtype=torch.float32)
     
     # new_smiles = sampler.sample_prior_unbatched(model, 100, properties)
     new_smiles = sampler.sample(model, properties, num_to_sample=100, max_seq_len=99)
     print(new_smiles)
+    

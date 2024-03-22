@@ -23,6 +23,8 @@ from torch.nn.utils import clip_grad_norm_
 
 from model_sd_vae import SDVAE
 
+from sd_lstm_utils import load_model
+
 
 
 class SDVAETrainer:
@@ -30,6 +32,7 @@ class SDVAETrainer:
                  train_x_enc, train_x_mask, train_y, 
                  valid_x_enc, valid_x_mask, valid_y, 
                  property_names, model,
+                 resume_epoch = 0,
                  
                  latent_dim = 56, # Latent space dimensionality
                  beta=1.0,
@@ -52,6 +55,7 @@ class SDVAETrainer:
         else:
             self.batch_size = batch_size
         self.learning_rate = learning_rate
+        self.resume_epoch = resume_epoch
 
         # "Early stopping" / training controls
         self.model_save_dir = model_save_dir
@@ -159,7 +163,8 @@ class SDVAETrainer:
             'valid_every_n_epochs': self.valid_every_n_epochs,
             'save_every_n_val_cycles': self.save_every_n_val_cycles,
             'decoder_rnn_type':self.decoder_rnn_type,
-            'decision_dim':self.decision_dim
+            'decision_dim':self.decision_dim,
+            'resume_epoch':self.resume_epoch
         }
         
         # Write the parameters dictionary to a JSON file
@@ -183,7 +188,9 @@ class SDVAETrainer:
         best_val_loss = np.inf
         # Save training parameters
         # TODO: Implement
-        for epoch_no in range(1, self.max_epochs + 1):
+        
+
+        for epoch_no in range(self.resume_epoch + 1, self.max_epochs + 1):
             # Train for epoch
             torch.cuda.empty_cache()
             avg_epoch_loss = self.run_epoch_vanilla_vae('train', epoch=epoch_no)
@@ -301,6 +308,17 @@ if __name__ == "__main__":
         property_names, train_x_enc, train_x_mask, train_y, valid_x_enc, valid_x_mask, valid_y = load_encodings_masks_and_properties(data_path)
 
         # Instantiate Trainer Class
+
+        # RESUME TRAINING
+        print()
+        print('RESUMING TRAINING: TODO: REMOVE ME:')
+        print()
+
+        model_weights = '../models/SD_VAE_MASKED_BIN_CE/SD_LSTM_shiny-shape-08_Epoch_68_Vl_0.056.pt'
+        model_definit = '../models/SD_VAE_MASKED_BIN_CE/SD_LSTM_shiny-shape-08_Epoch_68_Vl_0.056.json'
+
+        model = load_model(model_class=SDVAE, model_definition=model_definit, model_weights=model_weights, device='cpu')
+    
         trainer =  SDVAETrainer(
                  train_x_enc=train_x_enc, 
                  train_x_mask=train_x_mask, 
@@ -308,7 +326,7 @@ if __name__ == "__main__":
                  valid_x_enc=valid_x_enc, 
                  valid_x_mask=valid_x_mask,
                  valid_y=valid_y,
-                 property_names=['LogP'], model=None,
+                 property_names=['LogP'], model=model, resume_epoch=64,
                  model_save_dir = '../models/SD_VAE_MASKED_BIN_CE/'
                 )
 
