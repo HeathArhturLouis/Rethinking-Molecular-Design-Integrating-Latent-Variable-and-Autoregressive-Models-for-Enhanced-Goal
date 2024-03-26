@@ -5,19 +5,6 @@ import torch.nn as nn
 class ConditionalSDLSTM(nn.Module):
     def __init__(self, input_size, property_size, property_names, pnorm_means, pnorm_stds, 
                 hidden_size, output_size, n_layers, rnn_dropout, max_rules, rules_dict_size) -> None:
-        """
-        LSTM model for training on masked grammar encodings as in SD-VAE. Works like the regular CLSTM model
-        but holds and records SDLSTM related parameters
-
-        Args:
-            max_rules: Maximum no rules to apply
-            rules_dict_size: Length of one hots for encodings, input size
-            property_size: number of molecule properties
-            hidden_size: number of hidden units
-            output_size: number of output symbols
-            n_layers: number of hidden layers
-            rnn_dropout: recurrent dropout
-        """
 
         super().__init__()
         self.input_size = input_size
@@ -97,6 +84,8 @@ class ConditionalSDLSTM(nn.Module):
         output, hidden = self.rnn(inputs, hidden)
         output = self.decoder(output)
         return output, hidden
+
+
 
     def init_hidden(self, bsz, device):
         # LSTM has two hidden states...
