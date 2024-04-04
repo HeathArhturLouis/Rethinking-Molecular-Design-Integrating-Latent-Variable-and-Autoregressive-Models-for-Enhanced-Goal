@@ -11,6 +11,9 @@ from rdkit.Chem import Draw
 
 import matplotlib.pyplot as plt
 
+from joblib import Parallel, delayed
+
+
 
 def return_valid_smiles(smiles_list):
     valid_smiles = []
@@ -160,6 +163,47 @@ def property_metrics(smiles_list, target_props, prop_names=['LogP']):
             corrs.append(f'ERROR: Cannot compute correlation')
 
     return corrs, maes
+
+
+def reconstruct_single(model, smiles, labels, encode_times, decode_times):
+    print('a chunk starts...')
+    decode_result = []
+
+    chunk = smiles
+    chunk_result = [[] for _ in range(len(chunk))]
+    for _encode in range(encode_times):
+        z1 = model.encoder(chunk)
+        this_encode = []
+        encode_id, encode_total = _encode + 1, encode_times
+        for _decode in tqdm(list(range(decode_times)),
+                'encode %d/%d decode' % (encode_id, encode_total)
+            ):
+            _result = model.decode(z1, labels)
+            print(_result)
+            for index, s in enumerate(_result):
+                chunk_result[index].append(s)
+
+    decode_result.extend(chunk_result)
+    assert len(decode_result) == len(smiles)
+    return decode_result
+
+
+def reconstruct(model, smiles, labels, chunk_size, encode_times, decode_times):
+    chunk_result = Parallel(n_jobs=1)(
+        delayed(reconstruct_single)(model, smiles[chunk_start: chunk_start + chunk_size], labels[chunk_start: chunk_start + chunk_size], encode_times, decode_times)
+        for chunk_start in range(0, len(smiles), chunk_size)
+    )
+
+    decode_result = [_1 for _0 in chunk_result for _1 in _0]
+    assert len(decode_result) == len(smiles)
+    return decode_result
+
+
+def reconstruct_normalize(model, smiles, labels, chunk_size, encode_times, decode_times):
+    labels = model.normalize_prop_scores(labels)
+    return reconstruct(model, smiles, labels, chunk_size, encode_times, decode_times)
+
+
 
 
 if __name__ == '__main__':

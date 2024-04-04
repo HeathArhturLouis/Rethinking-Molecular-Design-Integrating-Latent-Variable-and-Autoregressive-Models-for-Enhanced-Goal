@@ -59,25 +59,9 @@ class SmilesRnnTrainer:
         batch_size = inp.size(0)
         hidden = self.model.init_hidden(inp.size(0), self.device)
 
-        # TODO: Delete Me
-        # print()
-        # print()
-        # print(inp[0])
-        # print()
-        # print()
-        # print(inp.shape)
-        # print(properties.shape)
-        # print(hidden[0].shape) # Hidden layers, should be fine
-        # print(hidden[1].shape) # Both: [3, 20, 512]
-        # print(len(hidden))
-        # raise Exception('Delete me fam')
-        
-
-        # inp is: 20x101 batch_size x max_seq_len
-        # properties is: 20x1 batch_size [property logP]
-
         output, hidden = self.model(inp, properties, hidden)
         output = output.view(output.size(0) * output.size(1), -1)
+
         loss = self.criteria[0](output, tgt.view(-1))
 
         return loss, batch_size

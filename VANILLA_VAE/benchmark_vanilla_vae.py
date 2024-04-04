@@ -85,7 +85,7 @@ class VanillaVAEHarness:
             z = model.encoder(tokens)[0]
             # z is shape batch_size x hidden_dimension_size
             # Decode to get logits
-            out_logits = model.state_decoder(z, target_props).permute(1, 0, 2)
+            out_logits = model.state_decoder(z, normd_props).permute(1, 0, 2)
 
         out_tokens = torch.argmax(out_logits, dim=-1)
 
@@ -104,18 +104,20 @@ class VanillaVAEHarness:
         Sample random points in the prior with given properties n_to_sample times
         This is the strategy applied in the SD VAE code (fixed test props and random sampled z's)
         '''
-        n_to_sample = properties.shape[0]
+        normd_props = model.normalize_prop_scores(properties)
+
+        n_to_sample = normd_props.shape[0]
         # Sample latent points
         latent_points = np.random.normal(0, model.eps_std, size=(n_to_sample, model.latent_dim))
         latent_points = torch.tensor(latent_points, dtype=torch.float32)
         # Latent Dist is shape n_to_sample, hidden_dim
         
-        # Sample logits 
+        # Sample logits
         model.reparam = False
         model.eval()
 
         with torch.no_grad():
-            raw_logits = model.state_decoder(latent_points, properties).permute(1, 0, 2)
+            raw_logits = model.state_decoder(latent_points, normd_props).permute(1, 0, 2)
 
         # Raw logits is shape n_to_sample x max_seq_len x decision_dim
         tokens = torch.argmax(raw_logits, dim=-1)
@@ -229,8 +231,8 @@ def benchmark_reconstruction_QM9(model, sampler):
 
 
 if __name__ == '__main__':
-    model_weights = '../models/VANILLA_VAE_QM9/SD_LSTM_tiny-pond-31_Epoch_56_Vl_0.365.pt'
-    model_definit = '../models/VANILLA_VAE_QM9/SD_LSTM_tiny-pond-31_Epoch_56_Vl_0.365.json'
+    model_weights = '../models/VANILLA_VAE_QM9_3_Layer/SD_LSTM_lively-rain-08_Epoch_37_Vl_0.334.pt'
+    model_definit = '../models/VANILLA_VAE_QM9_3_Layer/SD_LSTM_lively-rain-08_Epoch_37_Vl_0.334.json'
 
     sampler = VanillaVAEHarness(batch_size=64, device='cpu')
     model = load_model(model_class=VanillaMolVAE, model_definition=model_definit, model_weights=model_weights, device='cpu')

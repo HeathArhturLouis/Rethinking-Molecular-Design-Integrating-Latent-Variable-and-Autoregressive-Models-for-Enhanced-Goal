@@ -62,6 +62,9 @@ class SDVAESampler:
         input_smiles : batch_size x max_seq_len array of tokens representing a smiles
         target_props : 2D unnormalized tensor of properties batch_size x prop_size
         '''
+
+        raise Exception("Fix Property Normalization Before Running!!!!")
+
         model.reparam = False
         model.eval()
 
@@ -124,6 +127,8 @@ class SDVAESampler:
         Sample random points in the prior with given properties n_to_sample times
         This is the strategy applied in the SD VAE code (fixed test props and random sampled z's)
         '''
+
+        properties = model.normalize_prop_scores(properties)
         n_to_sample = properties.shape[0]
         # Sample latent points
         latent_points = np.random.normal(0, model.eps_std, size=(n_to_sample, model.latent_dim))
@@ -234,8 +239,6 @@ if __name__ == '__main__':
 
 
     # benchmark_reconstruction_QM9(model, sampler)
-
-
     
     properties = torch.tensor([[1.0] for _ in range(100)], dtype=torch.float32)
     

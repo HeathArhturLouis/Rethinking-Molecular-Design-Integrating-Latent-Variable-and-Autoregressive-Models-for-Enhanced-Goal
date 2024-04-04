@@ -22,7 +22,10 @@ import cfg_parser as parser
 
 from pytorch_initializer import weights_init
 
+# TODO: PARAMETERIZE
+GRU_LAYERS = 3
 '''
+
 VAE-MODEL DEFINITION
 '''
 
@@ -66,7 +69,7 @@ class VanillaMolVAE(nn.Module):
                                 latent_dim=self.latent_dim,
                                 vocab_size=self.vocab_size,
                                 embedding_dim=self.decoder_embedding_dim,
-                                device=self.device)
+                                device=self.device).to(device)
 
 
         self.state_decoder = StateDecoder(max_len=self.max_decode_steps, 
@@ -74,7 +77,7 @@ class VanillaMolVAE(nn.Module):
                                         vocab_size = self.vocab_size, 
                                         latent_dim=self.latent_dim, 
                                         module_type=self.decoder_mod_type, 
-                                        device=self.device)
+                                        device=self.device).to(device)
 
         self.loss_fnct = cross_entropy_calc
         self.kl_coeff = beta
@@ -123,7 +126,12 @@ class VanillaMolVAE(nn.Module):
         else:
             return mu
 
-    def forward(self, x_inputs, y_inputs, true_binary):
+    def forward(self, x_inputs, y_inputs, true_binary, return_logits = False):
+        '''
+        If return logits also returns raw logits 
+        '''
+
+
         # FWD pass through encoder
         z_mean, z_log_var = self.encoder(x_inputs)
         # Sampling
@@ -146,7 +154,10 @@ class VanillaMolVAE(nn.Module):
 
         kl_loss = -0.5 * torch.sum(1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
         
-        return recon_loss, self.kl_coeff * torch.mean(kl_loss)
+        if not return_logits:
+            return recon_loss, self.kl_coeff * torch.mean(kl_loss)
+        else:
+            return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits
 
     @property
     def config(self):
@@ -162,9 +173,8 @@ class VanillaMolVAE(nn.Module):
                     device=self.device,
                     # TODO: Make configurable
                     # padding_token=self.padding_token,
-                    
                     reparam=self.reparam,
-                    decoder_mod_type=self.decoder_mode_type)
+                    decoder_mod_type=self.decoder_mod_type)
 
 
 # encoder and decoder
@@ -257,7 +267,7 @@ class StateDecoder(nn.Module):
         # From latent dim + prop size to latent dim
         self.z_to_latent = nn.Linear(self.latent_dim, self.latent_dim)
         if self.module_type == 'gru':
-            self.gru = nn.GRU(self.latent_dim, 501, 1)
+            self.gru = nn.GRU(self.latent_dim, 501, GRU_LAYERS)
         # elif cmd_args.rnn_type == 'sru':
         #    self.gru = SRU(self.latent_dim, 501, 1)
         else:
