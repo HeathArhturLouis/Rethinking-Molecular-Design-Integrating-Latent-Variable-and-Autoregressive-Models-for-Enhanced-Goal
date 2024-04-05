@@ -61,17 +61,18 @@ class SDVAE(nn.Module):
         self.encoder = CNNEncoder(max_len=self.max_decode_steps,
                                   latent_dim=self.latent_dim, 
                                   device=self.device, 
-                                  decision_dim=self.decision_dim)
+                                  decision_dim=self.decision_dim).to(device)
 
         self.state_decoder = StateDecoder(max_len=self.max_decode_steps,
                                          latent_dim=self.latent_dim,
                                          prop_dim = self.prop_dim,
                                          rnn_type = self.decoder_rnn_type,
                                          decision_dim = self.decision_dim,
-                                         device=self.device)
+                                         device=self.device).to(device)
         
         # Loss calculator
         self.perp_calc = PerpCalculator(loss_type=self.loss_type)
+        
 
     def reparameterize(self, mu, logvar):
         '''LOUIS:
@@ -89,7 +90,7 @@ class SDVAE(nn.Module):
             eps = mu.data.new(mu.size()).normal_(0, self.eps_std)
             
             # Send to GPU if required
-            if self.device == 'gpu':
+            if self.device == 'cuda':
                 eps = eps.cuda()
             
             # LOUIS: This is no longer neccesary

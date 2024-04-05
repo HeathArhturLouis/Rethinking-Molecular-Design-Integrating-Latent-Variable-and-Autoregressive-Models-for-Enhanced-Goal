@@ -56,8 +56,13 @@ class PerpCalculator(nn.Module):
         if self.loss_type == 'binary':
             exp_pred = torch.exp(raw_logits) * rule_masks
 
+            # Clamp for numerical stability
+            exp_pred = torch.clamp(exp_pred, min=1e-9, max=1e+9)
+            norm = torch.clamp(norm, min=1e-9, max=1e+9)
+
             norm = F.torch.sum(exp_pred, 2, keepdim=True)
             prob = F.torch.div(exp_pred, norm)
+
 
             return [F.binary_cross_entropy(prob, true_binary) * CONFIG.max_decode_steps]
 

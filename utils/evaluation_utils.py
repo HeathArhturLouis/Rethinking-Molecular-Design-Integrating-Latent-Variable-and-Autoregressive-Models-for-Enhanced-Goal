@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 
 from joblib import Parallel, delayed
 
+import torch
+
 
 
 def return_valid_smiles(smiles_list):
@@ -164,44 +166,34 @@ def property_metrics(smiles_list, target_props, prop_names=['LogP']):
 
     return corrs, maes
 
+def benchmark_reconstruction_QM9(model, sampler, test_smiles, test_props):
 
-def reconstruct_single(model, smiles, labels, encode_times, decode_times):
-    print('a chunk starts...')
-    decode_result = []
+    # data_splits = np.load('../data/QM9/data_splits.npy')
+    # Load test PROPERTIES
+    # all_QM9 = pd.read_csv('../data/QM9/QM9_clean.csv')
+    # test_props = np.array((all_QM9['LogP']))[data_splits == 2]
+    # test_smiles = np.array((all_QM9['SMILES']))[data_splits == 2]
 
-    chunk = smiles
-    chunk_result = [[] for _ in range(len(chunk))]
-    for _encode in range(encode_times):
-        z1 = model.encoder(chunk)
-        this_encode = []
-        encode_id, encode_total = _encode + 1, encode_times
-        for _decode in tqdm(list(range(decode_times)),
-                'encode %d/%d decode' % (encode_id, encode_total)
-            ):
-            _result = model.decode(z1, labels)
-            print(_result)
-            for index, s in enumerate(_result):
-                chunk_result[index].append(s)
+    test_props = torch.tensor([[a] for a in test_props])
 
-    decode_result.extend(chunk_result)
-    assert len(decode_result) == len(smiles)
-    return decode_result
+    recon_smiles = sampler.reconstruct_smiles(model, test_smiles, test_props)
 
+    assert len(recon_smiles) == len(test_smiles)
 
-def reconstruct(model, smiles, labels, chunk_size, encode_times, decode_times):
-    chunk_result = Parallel(n_jobs=1)(
-        delayed(reconstruct_single)(model, smiles[chunk_start: chunk_start + chunk_size], labels[chunk_start: chunk_start + chunk_size], encode_times, decode_times)
-        for chunk_start in range(0, len(smiles), chunk_size)
-    )
+    same = 0
+    junk = 0
+    for i in range(len(recon_smiles)):
+        if recon_smiles[i] == test_smiles[i]:
+            same += 1
+        if 'JUNK' in recon_smiles[i]:
+            junk += 1
+    
+    acc = same / len(recon_smiles)
+    junk_pct = junk / len(recon_smiles)
+    print(f'Accuracy: { acc }')
+    print(f'Junk PCT: { junk_pct }')
+    return acc, junk_pct
 
-    decode_result = [_1 for _0 in chunk_result for _1 in _0]
-    assert len(decode_result) == len(smiles)
-    return decode_result
-
-
-def reconstruct_normalize(model, smiles, labels, chunk_size, encode_times, decode_times):
-    labels = model.normalize_prop_scores(labels)
-    return reconstruct(model, smiles, labels, chunk_size, encode_times, decode_times)
 
 
 

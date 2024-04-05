@@ -63,8 +63,6 @@ class SDVAESampler:
         target_props : 2D unnormalized tensor of properties batch_size x prop_size
         '''
 
-        raise Exception("Fix Property Normalization Before Running!!!!")
-
         model.reparam = False
         model.eval()
 
@@ -107,7 +105,7 @@ class SDVAESampler:
             tokens = torch.tensor(tokens, dtype=torch.float32).permute(0, 2, 1)
             z = model.encoder(tokens)[0]
 
-            out_logits = model.state_decoder(z, target_props)
+            out_logits = model.state_decoder(z, normd_props)
 
         # Out logits is seq_len x batch_size x decision_dim
         
@@ -238,11 +236,11 @@ if __name__ == '__main__':
     model = load_model(model_class=SDVAE, model_definition=model_definit, model_weights=model_weights, device='cpu')
 
 
-    # benchmark_reconstruction_QM9(model, sampler)
+    benchmark_reconstruction_QM9(model, sampler)
     
-    properties = torch.tensor([[1.0] for _ in range(100)], dtype=torch.float32)
+    # properties = torch.tensor([[1.0] for _ in range(100)], dtype=torch.float32)
     
     # new_smiles = sampler.sample_prior_unbatched(model, 100, properties)
-    new_smiles = sampler.sample(model, properties, num_to_sample=100, max_seq_len=99)
-    print(new_smiles)
+    # new_smiles = sampler.sample(model, properties, num_to_sample=100, max_seq_len=99)
+    # print(new_smiles)
     
