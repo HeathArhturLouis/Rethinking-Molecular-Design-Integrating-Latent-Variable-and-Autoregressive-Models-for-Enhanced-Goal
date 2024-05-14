@@ -9,6 +9,7 @@ from smiles_char_dict import SmilesCharDictionary
 
 
 sd = SmilesCharDictionary()
+char_num = sd.get_char_num()
 
 
 class ConditionalSmilesRnn(nn.Module):
@@ -60,7 +61,7 @@ class ConditionalSmilesRnn(nn.Module):
                 r_gate = param[int(0.25 * len(param)):int(0.5 * len(param))]
                 nn.init.constant_(r_gate, 1)
 
-    def forward(self, x, properties, hidden):
+    def forward(self, x, properties):
         '''
         Without Teacher Forcing
 
@@ -70,28 +71,36 @@ class ConditionalSmilesRnn(nn.Module):
         '''
 
         device = properties.device
-        
+
         max_length = x.shape[1]
-        # Shape: Batch size
-        initial_input = torch.tensor([([0] * sd.get_char_num()) for _ in range(properties.shape[0])], device=device, dtype=torch.float)
+        # Hard coded for speed
+        initial_input = torch.tensor([([0] * char_num) for _ in range(properties.shape[0])], device=device, dtype=torch.float)
+        initial_input[:, 1] = 1
 
         batch_size = properties.size(0)
 
         hidden = self.init_hidden(batch_size, device)
 
+        # Initial input is batch_size x decision_dim
+
         # Prepare the initial input token, which could be a 'start' token
-        inputs = self.encoder(initial_input).unsqueeze(1)  # Assuming initial_input is already a tensor of token IDs
+        inputs = self.encoder(initial_input) # Assuming initial_input is already a tensor of token IDs
 
-        outputs = []
+        outputs = torch.zeros([batch_size, max_length, char_num]).to(device)
 
-        for _ in range(max_length):
-            # Combine the inputs with the properties
+        # batch_size x msl x dec_dim
 
-            # Now
-            # inputs dimensionality 64 x 512
-            # properties shape 64x1
+        # outputs[:, 0, :] = initial_input.clone()
 
-            combined_inputs = torch.cat((inputs, properties.unsqueeze(1)), -1)
+        # batch_size x seq_len x decision dim
+
+        # Don't return start token
+        for step in range(0, max_length):
+
+            # inputs is 64, 512
+            # properties is 64, 1
+
+            combined_inputs = torch.cat([inputs, properties], 1)
 
             # Pass the combined input through the RNN
             rnn_output, hidden = self.rnn(combined_inputs, hidden)
@@ -100,37 +109,24 @@ class ConditionalSmilesRnn(nn.Module):
             logits = self.decoder(rnn_output)
 
             # Store the logits
-            outputs.append(logits)
+            outputs[:, step, :] = logits
 
             # Determine the next input token
 
             # Feed raw logits directly back into encoder
-            # next_input_token_ids = torch.argmax(logits, dim=-1)
             inputs = self.encoder(logits)
+            # inputs = logits
 
             # Implement your stopping criterion here
 
-        # Concatenate all logits from each step to form the output sequence
-        outputs = torch.cat(outputs, dim=1)
-        
-        return outputs, hidden
+        return outputs
 
-    '''
-    def forward(self, x, properties, hidden):
-        # inp is: 20x101 batch_size x max_seq_len
-        # properties is: 20x1 batch_size [property logP]
-        # input size is 47
-        embeds = self.encoder(x)
-        output, hidden = self.rnn(torch.cat((embeds, properties.unsqueeze(1).expand(-1,x.shape[1], -1)), -1), hidden)
-        output = self.decoder(output)
-        return output, hidden
 
-    '''
 
     def init_hidden(self, bsz, device):
         # LSTM has two hidden states...
-        return (torch.zeros(self.n_layers, bsz, self.hidden_size).to(device),
-                torch.zeros(self.n_layers, bsz, self.hidden_size).to(device))
+        return (torch.zeros(self.n_layers, self.hidden_size).to(device),
+                torch.zeros(self.n_layers, self.hidden_size).to(device))
 
     @property
     def config(self):

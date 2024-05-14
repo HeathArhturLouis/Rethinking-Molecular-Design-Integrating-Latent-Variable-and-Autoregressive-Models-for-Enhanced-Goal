@@ -46,9 +46,7 @@ class SmilesRnnTrainer:
         self.pc = PropertyCalculator(self.prop_names)
 
     def process_batch(self, batch, properties):
-
         # ship data to device
-
         # LOUIS: inp -> smiles so far | tgt -> next prediction 
         inp, tgt = batch
         inp = inp.to(self.device)
@@ -57,12 +55,22 @@ class SmilesRnnTrainer:
 
         # process data
         batch_size = inp.size(0)
-        hidden = self.model.init_hidden(inp.size(0), self.device)
+        # hidden = self.model.init_hidden(inp.size(0), self.device)
 
-        output, hidden = self.model(inp, properties, hidden)
-        output = output.view(output.size(0) * output.size(1), -1)
+        output = self.model(inp, properties)
 
-        loss = self.criteria[0](output, tgt.view(-1))
+        #$ output = output.view(output.size(0) * output.size(1), -1)
+        # Criteria is 
+        # [torch.nn.CrossEntropyLoss(ignore_index=sd.pad_idx)]
+
+        # output is batch_size x seq_len x decision_dim and contains raw logits
+        # tgt is batch_size x seq_len and contains integers (target tokens)
+        # token 0 should be ignored
+
+        output_reshaped = output.view(-1, output.size(-1))
+        tgt_reshaped = tgt.view(-1)
+
+        loss = self.criteria[0](output_reshaped, tgt_reshaped)
 
         return loss, batch_size
 
@@ -104,8 +112,8 @@ class SmilesRnnTrainer:
         tgt = tgt.to(self.device)
         batch_size = inp.size(0)
         properties = properties.to(self.device)
-        hidden = self.model.init_hidden(inp.size(0), self.device)
-        output, hidden = self.model(inp, properties, hidden)
+        # hidden = self.model.init_hidden(inp.size(0), self.device)
+        output = self.model(inp, properties)
         indices = output.argmax(dim = 2)
         
         ## Retrieve SMILES for batch
@@ -162,7 +170,7 @@ class SmilesRnnTrainer:
                 batch = batch_all[:-1]
                 properties = batch_all[-1]
                 
-                loss, size = self.test_on_batch_MSE(batch, properties)
+                loss, size = self.test_on_batch(batch, properties)
                 if loss > 0:
                     valid_losses += [loss]
                 else: 
@@ -269,7 +277,7 @@ class _ModelTrainingRound:
             self._report_training_progress(batch_index, epoch_index, epoch_start=train_t0)
 
         # report validation progress?
-        if batch_index >= 0 and batch_index % self.valid_every == 0:
+        if batch_index > 0 and batch_index % self.valid_every == 0:
             self._report_validation_progress(epoch_index)
 
     def _report_training_progress(self, batch_index, epoch_index, epoch_start):

@@ -78,10 +78,10 @@ def load_model(model_class, model_definition, model_weights, device, copy_to_cpu
     model.load_state_dict(torch.load(model_weights, map_location))
     return model.to(device)
 
-'''
+
 def load_rnn_model(model_definition, model_weights, device, copy_to_cpu=True):
     return load_model(ConditionalSmilesRnn, model_definition, model_weights, device, copy_to_cpu)
-'''
+
 
 def save_model(model, base_dir, base_name):
     model_params = os.path.join(base_dir, base_name + '.pt')
@@ -106,6 +106,20 @@ def load_smiles_and_properties(data_path,
     train_x, valid_x are np.Array[string] <--- smiles strings
     train_y, valid_y are np.Array[np.Array[float]] <--- properties
     '''
+    # TODO: Move this logic to trainer class
+    if 'QM9' in data_path:
+        dataset_file = 'QM9_clean.csv'
+        indecies_file = 'data_splits.npy'
+        fixed_len_numeric_file = 'QM9_fixed_numeric_smiles.csv'
+        id_name = 'QM9_id'
+    elif 'ZINC250K' in data_path:
+        dataset_file = 'ZINC_clean.csv'
+        indecies_file = 'data_splits.npy'
+        fixed_len_numeric_file = 'ZINC_fixed_numeric_smiles.csv'
+        id_name = 'ZINC_ID'
+    else:
+        raise Exception('Dataset not supported.')
+
     try:
         # Load full dataset with properties
         dataset = pd.read_csv(os.path.join(data_path, dataset_file))
@@ -118,14 +132,14 @@ def load_smiles_and_properties(data_path,
 
     invalid_indecies = []
 
-    property_list = list(dataset.columns.drop(['QM9_id', 'SMILES']))
+    property_list = list(dataset.columns.drop([id_name, 'SMILES']))
 
     #TODO: Convert to array?
     train_x = np.array(fixed_len_numeric[spl_indecies == 0])
     valid_x = np.array(fixed_len_numeric[spl_indecies == 1])
 
-    train_y = np.array(dataset[spl_indecies == 0].drop(['SMILES', 'QM9_id'], axis=1))
-    valid_y = np.array(dataset[spl_indecies == 1].drop(['SMILES', 'QM9_id'], axis=1))
+    train_y = np.array(dataset[spl_indecies == 0].drop(['SMILES', id_name], axis=1))
+    valid_y = np.array(dataset[spl_indecies == 1].drop(['SMILES', id_name], axis=1))
 
     return property_list, train_x, train_y, valid_x, valid_y
 

@@ -30,7 +30,6 @@ VAE-MODEL DEFINITION
 '''
 
 class VanillaMolVAE(nn.Module):
-
     def __init__(self, 
                 latent_dim, 
                 beta,
@@ -48,7 +47,6 @@ class VanillaMolVAE(nn.Module):
 
 
         super(VanillaMolVAE, self).__init__()
-
         self.pnorm_means = pnorm_means
         self.pnorm_stds = pnorm_stds
         self.latent_dim = latent_dim
@@ -71,7 +69,6 @@ class VanillaMolVAE(nn.Module):
                                 embedding_dim=self.decoder_embedding_dim,
                                 device=self.device).to(device)
 
-
         self.state_decoder = StateDecoder(max_len=self.max_decode_steps, 
                                         prop_dim=len(self.property_names),
                                         vocab_size = self.vocab_size, 
@@ -91,13 +88,12 @@ class VanillaMolVAE(nn.Module):
         '''
         assert properties.shape[-1] == self.property_size
 
-
         for i in range(self.property_size):
             # Apply ith index of self.pnorm_means and self.pnorm_stds to normalize every ith element of the 
             # num_properties dimension of properties
             properties[:, i] -= self.pnorm_means[i]
             properties[:, i] /= self.pnorm_stds[i]
-        
+
         return properties
 
     def reparameterize(self, mu, logvar):
@@ -128,10 +124,8 @@ class VanillaMolVAE(nn.Module):
 
     def forward(self, x_inputs, y_inputs, true_binary, return_logits = False):
         '''
-        If return logits also returns raw logits 
+        If return logits also returns raw logits
         '''
-
-
         # FWD pass through encoder
         z_mean, z_log_var = self.encoder(x_inputs)
         # Sampling
@@ -139,18 +133,8 @@ class VanillaMolVAE(nn.Module):
         z = self.reparameterize(z_mean, z_log_var)
         # Get raw logits 
         raw_logits = self.state_decoder(z, y_inputs)
-        
-        
-        # Compute perplexity
-
-        # true binary shape is : batch_size x max_seq_len dtype = int64
-        # raw_logits shape is : max_seq_len x batch_size x decision_dim dtype = float43
-        # loss_funct is torch.nn.CrossEntropyLoss(ignore_index=padding_token)
-        
-        # Put batch size first
 
         recon_loss = self.loss_fnct(true_tokens=true_binary.permute(1, 0), raw_logits=raw_logits)
-
 
         kl_loss = -0.5 * torch.sum(1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
         
@@ -158,6 +142,7 @@ class VanillaMolVAE(nn.Module):
             return recon_loss, self.kl_coeff * torch.mean(kl_loss)
         else:
             return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits
+
 
     @property
     def config(self):
@@ -198,6 +183,8 @@ class CNNEncoder(nn.Module):
         self.w1 = nn.Linear(self.last_conv_size * 10, 435)
         self.mean_w = nn.Linear(435, self.latent_dim)
         self.log_var_w = nn.Linear(435, self.latent_dim)
+        
+        
         weights_init(self)
 
     def forward(self, x_cpu):

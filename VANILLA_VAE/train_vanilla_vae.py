@@ -106,7 +106,8 @@ class VanillaVAETrainer:
 
         os.makedirs(self.model_save_dir, exist_ok=True)
 
-        # self.lr_scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.5, patience=5, min_lr=0.001)
+        self.lr_scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.5, patience=5, min_lr=0.000001)
+
 
     def _save_model(self, base_dir, info, epoch_no, valid_loss):
         """
@@ -176,8 +177,7 @@ class VanillaVAETrainer:
                 # Run validation
                 with torch.no_grad():
                     avg_valid_loss = self.run_epoch_vanilla_vae('valid', epoch=epoch_no)
-
-                    # self.lr_scheduler.step(avg_valid_loss)
+                    self.lr_scheduler.step(avg_valid_loss)
                 # If val better or save every n validations
                 if avg_valid_loss <= best_val_loss or epoch_no % save_every_n_val_cycles == 0:
                     # Save model
@@ -226,6 +226,7 @@ class VanillaVAETrainer:
             if phase == 'train':
                 self.optimizer.zero_grad()
                 batch_loss.backward()
+                clip_grad_norm_(self.model.parameters(), 0.2)
                 self.optimizer.step()
 
             total_batches += 1
@@ -282,11 +283,11 @@ if __name__ == "__main__":
                 eps_std=0.01,
                 model=None,
                 decoder_embedding_dim=47,
-                learning_rate = 1e-3,
+                learning_rate = 1e-4,
                 model_save_dir = '../models/VANILLA_VAE_QM9_3_Layer/', 
                 valid_every_n_epochs = 1, 
-                save_every_n_val_cycles = 3, 
-                max_epochs = 100
+                save_every_n_val_cycles = 1,
+                max_epochs = 500
                 )
 
         # Save some memory in case we're running on CPU, delete external refs to dead objects

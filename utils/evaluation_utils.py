@@ -84,6 +84,47 @@ def props_from_smiles(smiles_list, verbose=True, prop_names = ['LogP']):
     return props
 
 
+
+def absolute_metrics(smiles_list, train_smiles):
+    '''
+    Compute validity, novelty and uniqueness in the same manner as SD-VAE code base
+
+    - validity: valid / all
+    - unique: unique valid / all
+    - novelty: novel uniqe valid / all 
+
+    return [validity, uniqueness, novelty]
+    '''
+
+    valid_smiles = []
+
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        try:
+            # Translating back from rdkit yields the canonical representation
+            valid_smiles.append(Chem.MolToSmiles(mol))
+        except:
+            pass
+
+
+    validity = len(valid_smiles) / len(smiles_list)
+
+
+    unique = set(valid_smiles)
+    uniqueness = len(unique) / len(smiles_list)
+
+    train_smiles = set(train_smiles)
+    
+    n_intersect = 0
+    for smi in unique:
+        if smi in train_smiles:
+            n_intersect += 1
+
+    novelty = (len(unique) - n_intersect) / len(smiles_list)
+
+    return validity, uniqueness, novelty
+
+
 def amina_metrics(smiles_list, train_smiles):
     '''
     Compute validity, novelty and uniqueness in the same manner as SD-VAE code base
@@ -132,7 +173,6 @@ def property_metrics(smiles_list, target_props, prop_names=['LogP']):
     ignore invalid molecules
     '''
         
-    
     pc = PropertyCalculator(prop_names)
 
     assert len(smiles_list) == len(target_props)
@@ -166,8 +206,7 @@ def property_metrics(smiles_list, target_props, prop_names=['LogP']):
 
     return corrs, maes
 
-def benchmark_reconstruction_QM9(model, sampler, test_smiles, test_props):
-
+def benchmark_reconstruction_QM9(model, sampler, test_smiles, test_props, random=False):
     # data_splits = np.load('../data/QM9/data_splits.npy')
     # Load test PROPERTIES
     # all_QM9 = pd.read_csv('../data/QM9/QM9_clean.csv')
@@ -176,7 +215,7 @@ def benchmark_reconstruction_QM9(model, sampler, test_smiles, test_props):
 
     test_props = torch.tensor([[a] for a in test_props])
 
-    recon_smiles = sampler.reconstruct_smiles(model, test_smiles, test_props)
+    recon_smiles = sampler.reconstruct_smiles(model=model, input_smiles=test_smiles, target_props=test_props, random=random)
 
     assert len(recon_smiles) == len(test_smiles)
 

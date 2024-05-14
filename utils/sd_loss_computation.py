@@ -34,7 +34,6 @@ def masked_ce(true_one_hots, mask, logits, use_mask=True):
 
 
 
-
 class PerpCalculator(nn.Module):
     def __init__(self, loss_type = None):
         super(PerpCalculator, self).__init__()
@@ -58,9 +57,11 @@ class PerpCalculator(nn.Module):
 
             # Clamp for numerical stability
             exp_pred = torch.clamp(exp_pred, min=1e-9, max=1e+9)
-            norm = torch.clamp(norm, min=1e-9, max=1e+9)
 
+            # true_binary = torch.clamp(true_binary, min=1e-9, max=1e9)
             norm = F.torch.sum(exp_pred, 2, keepdim=True)
+            norm = torch.clamp(norm, min=1e-9, max=1e+9)
+            
             prob = F.torch.div(exp_pred, norm)
 
 
