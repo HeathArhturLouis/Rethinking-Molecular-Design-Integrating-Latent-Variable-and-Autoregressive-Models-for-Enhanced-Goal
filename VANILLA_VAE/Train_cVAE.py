@@ -80,6 +80,7 @@ class VanillaVAETrainerReg:
 
         assert regularizer_type in [None, 'KLD', 'Pol', 'Pol2']
 
+        self.unconditional = True
         self.n_lstm_samples = n_lstm_samples
         self.regularizer_type = regularizer_type
         self.early_stopping_epochs = early_stopping_epochs
@@ -441,7 +442,7 @@ class VanillaVAETrainerReg:
 
         return regularizer_loss
     '''
-    def compute_dkl_regularizer_loss(self, props):
+    def compute_dkl_regularizer_loss(self, props, n_latent_samps = 8):
         '''
         Loss is sum of KLD's between next-token probabilities for decoder and lstm under the LSTM actions, and respecting LSTM end token
         '''
@@ -449,15 +450,13 @@ class VanillaVAETrainerReg:
         '''
         Fetch decoder logits and convert to probabilities
         '''
+
+        # Expand properties by number of latent samples 
+        props = props.repeat_interleave(n_latent_samps, dim=0)
+
         # sample latent points
         latent_points = torch.randn(props.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) * self.model.eps_std
 
-        decoder_logits = self.model.state_decoder(z=latent_points, y=props).permute(1, 0, 2)
-
-        # subtract max and convert to probs
-        stable_decoder_logits = decoder_logits - decoder_logits.max(dim=-1, keepdim=True)[0]
-
-        decoder_probs = torch.softmax(stable_decoder_logits, dim=-1)
 
         '''
         Fetch LSTM logits and actions and convert to probabilities
@@ -482,6 +481,15 @@ class VanillaVAETrainerReg:
         
         lstm_probs = torch.softmax(lstm_logits_stable, dim=-1)
 
+
+        # GET DECODER LOGITS ETC...
+        decoder_logits = self.model.state_decoder(z=latent_points, y=props).permute(1, 0, 2)
+
+        # subtract max and convert to probs
+        stable_decoder_logits = decoder_logits - decoder_logits.max(dim=-1, keepdim=True)[0]
+
+        decoder_probs = torch.softmax(stable_decoder_logits, dim=-1)
+
         # lstm_probs is 64 x 101 x 47
         # decoder_probs is 64 x 101 x 47
         # lstm_actions is 64 x 101
@@ -489,6 +497,7 @@ class VanillaVAETrainerReg:
         '''
         Compute KLD between the two
         '''
+
         kl_divs = F.kl_div(decoder_probs.log(), lstm_probs, reduction='none').sum(dim=2)
 
         #kl_divs is b_size x seq_len
@@ -507,6 +516,7 @@ class VanillaVAETrainerReg:
 
         
         selected_kl_divs = kl_divs.masked_fill(cumulative_end_mask, 0)
+
         '''
         Sum weight and return
         '''
@@ -765,7 +775,7 @@ class VanillaVAETrainerReg:
 
         return log_probs
 
-    def log_probs_from_logits(self, actions, logits, weight = True):
+    def log_probs_from_logits(self, actions, logits, weight = False):
         '''
         Weight to avoid bias towards shorter strings with higher probs
         '''
@@ -936,6 +946,9 @@ class VanillaVAETrainerReg:
             # Inp contains start token
             # tgt does is offset by one
 
+            if self.unconditional:
+                prop = torch.zeros_like(prop)
+
             recon_loss, kl_loss, raw_logits = self.model.forward(x_inputs=inp, y_inputs=prop, true_binary=tgt,  return_logits=True)
             
             regularizer_loss = torch.tensor(0.0, device=self.device)
@@ -1001,16 +1014,18 @@ if __name__ == "__main__":
 
         dset = 'QM9' # 'ZINC' # or 'QM9'
         device = 'cpu'
-        regularizer_type = 'Pol' # 'Pol' # in 'Pol', 'Pol2', 'KLD', None
+        regularizer_type = None # 'Pol' # in 'Pol', 'Pol2', 'KLD', None
         run_save_folder = '../../LONG_RUNS_6/'
 
-
         reg_weight = 0.1
-        latent_dim = 56 # 196 , 56
-        batch_size = 64  # 265
+        latent_dim = 56 # 56
+        batch_size = 16  # 265
         beta = 1.0 # 0.2
         preg_decoder_sample_size = 10
         preg_latent_sample_size = 4
+        # Is weighted flag set correctly
+        # Is unconditional flag set correctly
+
 
         '''
         /RUN PARAMETERS

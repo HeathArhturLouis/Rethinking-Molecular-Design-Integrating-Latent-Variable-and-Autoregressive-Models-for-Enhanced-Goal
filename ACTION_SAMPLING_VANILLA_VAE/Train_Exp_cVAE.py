@@ -83,6 +83,9 @@ class RegularizedVAETrainer:
                  wandb_project = None,
                  early_stopping = 15):
 
+        ''' If true sets conditional information to zero for measuring unconditional performance '''
+        self.unconditional = False
+
 
         assert regularizer_type in [None, 'KLD', 'Pol', 'Pol2']
         self.regularizer_type = regularizer_type
@@ -271,7 +274,6 @@ class RegularizedVAETrainer:
 
         # lstm_actions is 64 x 99
 
-        # UGLY HACK! It runs pretty deep so I will FIX THIS LATER
         end_tokens = torch.zeros([b_size, 1], dtype=lstm_actions.dtype, device=lstm_actions.device)
 
         aug_actions = torch.cat([start_tokens, lstm_actions, end_tokens], dim=-1)
@@ -426,6 +428,7 @@ class RegularizedVAETrainer:
             self.model.reparam = False
             data_loader = self.val_data_loader
 
+
         # TODO: Progress bar
         n_batches = len(data_loader.dataset) // data_loader.batch_size + (len(data_loader.dataset) % data_loader.batch_size != 0)
         pbar = tqdm(range(0, n_batches), unit='batch')
@@ -440,6 +443,9 @@ class RegularizedVAETrainer:
         for bindex, (inp, tgt, prop) in enumerate(data_loader):
             # Send everything to device
             inp, tgt, prop = inp.to(self.device), tgt.to(self.device), prop.to(self.device)
+
+            if self.unconditional:
+                prop = torch.zeros_like(prop)
 
             # Teacher forcing with teacher forcing prob probability
             use_tf = (random.random() < self.teacher_forcing_prob)
