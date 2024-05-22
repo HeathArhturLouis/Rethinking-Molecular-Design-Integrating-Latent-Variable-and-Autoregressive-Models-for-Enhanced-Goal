@@ -48,6 +48,8 @@ class VanillaVAEHarness:
         '''
         Returns reconstruction of all input tokens
 
+        Does not reparameterise,
+
         model : vanilla VAE model
         input_smiles : batch_size x max_seq_len array of tokens representing a smiles
         target_props : 2D unnormalized tensor of properties batch_size x prop_size
@@ -55,7 +57,6 @@ class VanillaVAEHarness:
         # Reparameterization is generally not neccesary during inference
         # This flag works as it is checked inside the reparam function
         model.reparam = False
-
         model.eval()
 
         if not torch.is_tensor(target_props):
@@ -115,6 +116,9 @@ class VanillaVAEHarness:
         Sample random points in the prior with given properties n_to_sample times
         This is the strategy applied in the SD VAE code (fixed test props and random sampled z's)
         '''
+
+        old_reparam = model.reparam
+
         normd_props = model.normalize_prop_scores(properties)
 
         n_to_sample = normd_props.shape[0]
@@ -134,6 +138,8 @@ class VanillaVAEHarness:
             out_actions = model.state_decoder(latent_points, normd_props, x_inputs = None, teacher_forcing = False, return_logits = False)[:, 1:]
 
         out_smiles = self.sd.matrix_to_smiles(out_actions)
+
+        model.reparam = old_reparam
 
         return out_smiles
     
@@ -170,38 +176,6 @@ class VanillaVAEHarness:
 
         return out_smiles
 
-'''
-def cal_valid_prior(model, latent_dim, labels, nb_latent_point, sample_times, chunk_size, sigma):
-    import rdkit
-    from rdkit import Chem
-    whole_valid, whole_total = 0, 0
-    valid_smile = []
-    pbar = tqdm(list(range(0, nb_latent_point, chunk_size)), desc='decoding')
-    for start in pbar:
-        end = min(start + chunk_size, nb_latent_point)
-        # SAMPLE LATENT POINT
-        latent_point = np.random.normal(0, sigma, size=(end - start, latent_dim))
-        latent_point = latent_point.astype(np.float32)
-        #y = np.tile(labels, (nb_latent_point,1)) 
-        
-        # GET LABELS PROVIDED AS ARGUMENT SOMEHOW
-        y = labels[:end-start].astype(np.float32)
-
-        # GET LOGITS AND DECODE TO SMILES
-        raw_logits = model.pred_raw_logits(latent_point, y)
-        decoded_array = batch_decode(raw_logits, True, decode_times=sample_times)
-
-        for i in range(end - start):
-            for j in range(sample_times):
-                s = decoded_array[i][j]
-                if not s.startswith('JUNK') and Chem.MolFromSmiles(s) is not None:
-                    whole_valid += 1
-                    valid_smile.append(s)
-                whole_total += 1
-        pbar.set_description('valid : total = %d : %d = %.5f' % (whole_valid, whole_total, whole_valid * 1.0 / whole_total))
-    return 1.0 * whole_valid / whole_total, whole_valid, whole_total, valid_smile
-'''
-
 from rdkit import Chem
 from tqdm import tqdm
 
@@ -225,35 +199,6 @@ def props_from_smiles(smiles_list, verbose=True):
 
 
 import pandas as pd
-
-def benchmark_reconstruction_QM9(model, sampler):
-    # Load test SMILES from data_path
-
-    data_splits = np.load('../data/QM9/data_splits.npy')
-    # Load test PROPERTIES
-    all_QM9 = pd.read_csv('../data/QM9/QM9_clean.csv')
-    test_props = np.array((all_QM9['LogP']))[data_splits == 2]
-    test_smiles = np.array((all_QM9['SMILES']))[data_splits == 2]
-
-    test_props = torch.tensor([[a] for a in test_props])
-
-    recon_smiles = sampler.reconstruct_smiles(model, test_smiles, test_props)
-
-    assert len(recon_smiles) == len(test_smiles)
-
-    same = 0
-    junk = 0
-    for i in range(len(recon_smiles)):
-        if recon_smiles[i] == test_smiles[i]:
-            same += 1
-        if 'JUNK' in recon_smiles[i]:
-            junk += 1
-    
-    acc = same / len(recon_smiles)
-    junk_pct = junk / len(recon_smiles)
-    print(f'Accuracy: { acc }')
-    print(f'Junk PCT: { junk_pct }')
-
 
 if __name__ == '__main__':
     # model_weights = '../models/REG_VAE_BEST/SD_REG_VANILLA_VAE_mute-brook-70_Epoch_261_Vl_0.161.pt'

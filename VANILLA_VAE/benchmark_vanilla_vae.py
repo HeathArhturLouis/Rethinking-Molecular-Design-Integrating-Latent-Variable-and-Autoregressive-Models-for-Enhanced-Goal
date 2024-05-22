@@ -116,7 +116,12 @@ class VanillaVAEHarness:
         This is the strategy applied in the SD VAE code (fixed test props and random sampled z's)
 
         if z != None fixes latent points
+
+        resets value of reparam after being called
         '''
+
+        old_reparam = model.reparam
+
         normd_props = model.normalize_prop_scores(properties)
 
         n_to_sample = normd_props.shape[0]
@@ -128,7 +133,7 @@ class VanillaVAEHarness:
         latent_points = torch.tensor(latent_points, dtype=torch.float32)
         # Latent Dist is shape n_to_sample, hidden_dim
         
-        # Sample logits
+        # Reparam can be false since we're already sampling from the prior / have already provided latent points sampled from the prior
         model.reparam = False
         model.eval()
 
@@ -145,6 +150,8 @@ class VanillaVAEHarness:
             tokens = distribution.sample()
 
         out_smiles = self.sd.matrix_to_smiles(tokens)
+
+        model.reparam = old_reparam
 
         return out_smiles
         

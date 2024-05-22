@@ -615,7 +615,6 @@ class RegularizedVAETrainer:
         return -1 * self.regularizer_weight * log_probs.mean()
 
 
-
     def _sample_decoder_actions_and_likelihoods(self, input_latent, input_props, decoder_sample_size):
         '''
         Input:
@@ -739,8 +738,6 @@ class RegularizedVAETrainer:
 
         return self.regularizer_weight * preg_loss
 
-
-        
         
 
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ class VanillaVAETrainerReg:
 
         assert regularizer_type in [None, 'KLD', 'Pol', 'Pol2']
 
-        self.unconditional = True
+        self.unconditional = False
         self.n_lstm_samples = n_lstm_samples
         self.regularizer_type = regularizer_type
         self.early_stopping_epochs = early_stopping_epochs
@@ -442,9 +442,12 @@ class VanillaVAETrainerReg:
 
         return regularizer_loss
     '''
-    def compute_dkl_regularizer_loss(self, props, n_latent_samps = 8):
+
+
+    def compute_dkl_regularizer_loss(self, props, p_theta_avg = 8):
         '''
         Loss is sum of KLD's between next-token probabilities for decoder and lstm under the LSTM actions, and respecting LSTM end token
+        p_theta_avg is how many p_\theta samples we average over before the KL_D
         '''
 
         '''
@@ -452,11 +455,10 @@ class VanillaVAETrainerReg:
         '''
 
         # Expand properties by number of latent samples 
-        props = props.repeat_interleave(n_latent_samps, dim=0)
+        props_repeated = props.repeat_interleave(p_theta_avg, dim=0)  
 
         # sample latent points
-        latent_points = torch.randn(props.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) * self.model.eps_std
-
+        latent_points_expanded = torch.randn(props_repeated.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) * self.model.eps_std
 
         '''
         Fetch LSTM logits and actions and convert to probabilities
@@ -481,14 +483,21 @@ class VanillaVAETrainerReg:
         
         lstm_probs = torch.softmax(lstm_logits_stable, dim=-1)
 
-
         # GET DECODER LOGITS ETC...
-        decoder_logits = self.model.state_decoder(z=latent_points, y=props).permute(1, 0, 2)
+        decoder_logits = self.model.state_decoder(z=latent_points_expanded, y=props_repeated).permute(1, 0, 2)
 
         # subtract max and convert to probs
         stable_decoder_logits = decoder_logits - decoder_logits.max(dim=-1, keepdim=True)[0]
 
-        decoder_probs = torch.softmax(stable_decoder_logits, dim=-1)
+        decoder_probs_exp = torch.softmax(stable_decoder_logits, dim=-1)
+
+        # Average each group of n probabilities
+
+        # decoder log probs is b_size * p_theta_avg x seq_len x decision_dim
+
+        reshaped_tensor = decoder_probs_exp.view(props.shape[0], p_theta_avg, lstm_probs.shape[-2], lstm_probs.shape[-1])
+
+        decoder_probs_avg = torch.mean(reshaped_tensor, dim=1)
 
         # lstm_probs is 64 x 101 x 47
         # decoder_probs is 64 x 101 x 47
@@ -498,7 +507,7 @@ class VanillaVAETrainerReg:
         Compute KLD between the two
         '''
 
-        kl_divs = F.kl_div(decoder_probs.log(), lstm_probs, reduction='none').sum(dim=2)
+        kl_divs = F.kl_div(decoder_probs_avg.log(), lstm_probs, reduction='none').sum(dim=2)
 
         #kl_divs is b_size x seq_len
 
@@ -834,10 +843,16 @@ class VanillaVAETrainerReg:
         props -> property scores 
         n_lstm_samples -> number of samples per property score to sample from the LSTM
             ! sample a seperate latent point for each of these
+
+            TODO: Check I'm sampling from lstm for 1 y and 1 z
         '''
 
         '''
         Repeat properties by n_lstm_samples and sample latent points
+        '''
+
+        '''
+        IS THIS WRONG? SHOULD IT BE THE SAME Y AND Z. HERE ITS FOR THE SAME Y SAMPLE Z AND LSTM
         '''
         expanded_props = props.repeat_interleave(n_lstm_samples, dim=0)
         
@@ -1014,7 +1029,7 @@ if __name__ == "__main__":
 
         dset = 'QM9' # 'ZINC' # or 'QM9'
         device = 'cpu'
-        regularizer_type = None # 'Pol' # in 'Pol', 'Pol2', 'KLD', None
+        regularizer_type = 'KLD' # 'Pol' # in 'Pol', 'Pol2', 'KLD', None
         run_save_folder = '../../LONG_RUNS_6/'
 
         reg_weight = 0.1
