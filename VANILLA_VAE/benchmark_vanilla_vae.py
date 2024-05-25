@@ -23,6 +23,8 @@ class VanillaVAEHarness:
         self.device = device
         self.sd = SmilesCharDictionary()
 
+        self.latent_var = 1.0
+
     def cal_accuracy(self, decode_result, smiles):
         accuracy = [sum([1 for c in cand if c == s]) * 1.0 / len(cand) for s, cand in zip(smiles, decode_result)]
         junk = [sum([1 for c in cand if c.startswith('JUNK')]) * 1.0 / len(cand) for s, cand in zip(smiles, decode_result)]
@@ -128,7 +130,8 @@ class VanillaVAEHarness:
         # Sample latent points
 
         if latent_points is None:
-            latent_points = np.random.normal(0, model.eps_std, size=(n_to_sample, model.latent_dim))
+            latent_points = np.random.normal(0, self.latent_var, size=(n_to_sample, model.latent_dim))
+            # latent_points = np.random.normal(0, model.eps_std, size=(n_to_sample, model.latent_dim))
 
         latent_points = torch.tensor(latent_points, dtype=torch.float32)
         # Latent Dist is shape n_to_sample, hidden_dim

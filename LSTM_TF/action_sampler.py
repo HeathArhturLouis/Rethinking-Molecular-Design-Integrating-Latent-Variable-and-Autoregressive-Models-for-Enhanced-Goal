@@ -34,7 +34,7 @@ class ActionSampler:
 
         self.distribution_cls = Categorical if distribution_cls is None else distribution_cls
 
-    def sample(self, model: ConditionalSmilesRnn, properties, num_samples: int) -> torch.Tensor:
+    def sample(self, model: ConditionalSmilesRnn, properties) -> torch.Tensor:
         """
         Samples a specified number of actions from an RNN model based on a multinomial distribution.
 
@@ -50,19 +50,10 @@ class ActionSampler:
         """
 
         properties = torch.FloatTensor(properties)
-        
-        # Just assume properties defined Correctly
-        #if len(properties.shape) == 1:
-        #    properties.unsqueeze(0)
-        #assert len(properties.shape) == 2
         num_properties = properties.shape[-1]
-        
-        # Resize properties in order to batch across num_samples and num_targets
-        expanded_properties = properties.unsqueeze(1).expand(-1, num_samples, num_properties).reshape(-1, num_properties)
 
-        # Round up division to get the number of batches that are necessary:
-        total_samples = expanded_properties.shape[0]
-        number_batches = (total_samples + self.max_batch_size - 1) // self.max_batch_size
+        total_samples = properties.shape[0]
+        number_batches = ( total_samples // self.max_batch_size ) + 1
         remaining_samples = total_samples
 
         actions = torch.LongTensor(total_samples, self.max_seq_length).to(self.device)
@@ -73,13 +64,13 @@ class ActionSampler:
             batch_size = min(self.max_batch_size, remaining_samples)
             batch_end = batch_start + batch_size
 
-            batch_properties = expanded_properties[batch_start:batch_end].to(self.device)
+            batch_properties = properties[batch_start:batch_end].to(self.device)
             actions[batch_start:batch_end, :] = self._sample_batch(model, batch_properties, batch_size)
 
             batch_start += batch_size
             remaining_samples -= batch_size
 
-        return actions.reshape(-1, num_samples, self.max_seq_length)
+        return actions # actions.reshape(-1, properties.shape[0], self.max_seq_length)
 
     def _sample_batch(self, model: ConditionalSmilesRnn, properties, batch_size: int) -> torch.Tensor:
         """
@@ -100,8 +91,8 @@ class ActionSampler:
         actions = torch.zeros((batch_size, self.max_seq_length), dtype=torch.long).to(self.device)
 #         properties = properties.unsqueeze(0).expand(batch_size, -1)
 
-        actions = model.forward(self, None, properties, hidden, use_teacher_forcing = False, sampling = False, return_actions = True)
-
+        # actions = model.forward(self, None, properties, hidden, use_teacher_forcing = False, sampling = False, return_actions = True)
+        actions, hidden = model.forward(x = None, properties = properties, hidden = hidden, use_teacher_forcing=False, return_actions= True, seq_len=self.max_seq_length + 1)
         '''
         for char in range(self.max_seq_length):
             output, hidden = model(inp, properties, hidden)
@@ -115,6 +106,6 @@ class ActionSampler:
             inp = action
         '''
 
-        return actions
+        return torch.tensor(actions)
 
 

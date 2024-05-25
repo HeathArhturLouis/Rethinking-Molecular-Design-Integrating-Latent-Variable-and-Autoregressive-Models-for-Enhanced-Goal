@@ -12,11 +12,7 @@ from torch.utils.data import DataLoader
 from rnn_utils import save_model, time_since
 from rdkit import Chem
 from smiles_char_dict import SmilesCharDictionary
-
-import random
-
-# No longer needed
-# from gencond.properties import PROPERTIES, TYPES
+from gencond.properties import PROPERTIES, TYPES
 sd = SmilesCharDictionary()
 
 # logger = logging.getLogger(__name__)
@@ -25,34 +21,24 @@ sd = SmilesCharDictionary()
 # LOUIS: RDKit molecules vlaidation is loud
 from rdkit import RDLogger
 
-import sys
-
-sys.path.append('../utils/')
-from property_calculator import PropertyCalculator
 
 
 class SmilesRnnTrainer:
-    def __init__(self, normalizer_mean, normalizer_std, model, criteria, optimizer, device, prop_names, log_dir=None, clip_gradients=True, tf_prob = 0.3) -> None:
+
+    def __init__(self,normalizer_mean,normalizer_std, model, criteria, optimizer, device, log_dir=None, clip_gradients=True) -> None:
         self.model = model.to(device)
         self.criteria = [c.to(device) for c in criteria]
         self.optimizer = optimizer
         self.device = device
         self.log_dir = log_dir
         self.clip_gradients = clip_gradients
-
         # self.graph_logger = graph_logger
         self.mean = normalizer_mean
         self.std = normalizer_std
 
-        self.prop_names = prop_names # List of property names as defined in utils/property_calculator
-        self.pc = PropertyCalculator(self.prop_names)
-        # THIS IS NEW
-        self.tf_prob = tf_prob
-
     def process_batch(self, batch, properties):
-        # ship data to device
 
-        # LOUIS: inp -> smiles so far | tgt -> next prediction 
+        # ship data to device
         inp, tgt = batch
         inp = inp.to(self.device)
         tgt = tgt.to(self.device)
@@ -61,39 +47,13 @@ class SmilesRnnTrainer:
         # process data
         batch_size = inp.size(0)
         hidden = self.model.init_hidden(inp.size(0), self.device)
-
-        # inp is 64 x 101 | Contains start token
-        # tgt is 64 x 101 | Shifted by one from start token
-        
-        # Expects initial token in input when using teacher forcing
-        # Returns both actions and logits without the initial token!
-        
-        output, hidden = self.model(
-                        x = inp, 
-                        properties = properties, 
-                        hidden = hidden, 
-                        use_teacher_forcing = (random.random() < self.tf_prob), 
-                        sampling = True,
-                        return_actions = False,
-                        return_both = False, 
-                        seq_len = inp.shape[1])
-
-        # output is shape 64 x 100 x 47 and contains logits without initial token
-        
-        flat_output = output.view(output.size(0) * output.size(1), -1)
-        # flat_output is shape 6400 x 47
-
-        # Remove final padding token of target
-        cropped_tgt = tgt[:, :-1]
-        flat_tgt = cropped_tgt.reshape(-1)
-        # flat_tgt is 6400
-
-        # Under the hood this is torch.nn.CrossEntropyLoss(ignore_index=sd.pad_idx)
-        loss = self.criteria[0](flat_output, flat_tgt)
-
-        return loss / batch_size, batch_size
+        output, hidden = self.model(inp, properties, hidden)
+        output = output.view(output.size(0) * output.size(1), -1)
+        loss = self.criteria[0](output, tgt.view(-1))
+        return loss, batch_size
 
     def train_on_batch(self, batch, properties):
+
         # setup model for training
         self.model.train()
         self.model.zero_grad()
@@ -104,7 +64,7 @@ class SmilesRnnTrainer:
 
         # optimize
         if self.clip_gradients:
-            nn.utils.clip_grad_norm_(self.model.parameters(), 0.2)
+            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.optimizer.step()
 
         return loss.item(), size
@@ -134,8 +94,6 @@ class SmilesRnnTrainer:
         hidden = self.model.init_hidden(inp.size(0), self.device)
         output, hidden = self.model(inp, properties, hidden)
         indices = output.argmax(dim = 2)
-        
-        ## Retrieve SMILES for batch
         smiles = np.array(sd.matrix_to_smiles(indices))
         valid = []
         valid_index = []
@@ -143,38 +101,27 @@ class SmilesRnnTrainer:
 
         #LOUIS: Silence RDKit
         logger = RDLogger.logger()
-        logger.setLevel(RDLogger.CRITICAL)
-
-        # LOUIS: TODO: Remove debug code 
-
-        ### Convert SMILES to RDKit Molecular format
+        logger.setLevel(RDLogger.CRITICAL) 
         for i in range(smiles.shape[0]):
+            
             mol = Chem.MolFromSmiles(smiles[i])
             try:
                 valid.append(Chem.MolToSmiles(mol))
 
-                prop.append(self.pc(mol))
+                prop.append([p(mol) for p in PROPERTIES.values()])
                 valid_index.append(i)
-                # TODO: Remove
             except:
-                #### LOUIS: Is loud when model fails to generate valid molecule
+                #### LOUIS: THis is where I'm getting the failure exceptions
                 pass   
-
-
         # Louis, reset the logging verbosity
         logger.setLevel(RDLogger.INFO)
         
-        # Compute the mean property errors
         if np.array(valid_index).shape[0] == 0:
-            #LOUIS: This seems dangerous, if none of the SMILES are valid won't this set the loss to 0?
             loss = 0
-        else:
-            #LOUIS: This is where I the fixed property size comes into play
+        else:  
             prop = (np.array(prop) - self.mean ) / self.std
             #output_prop = (properties[np.array(valid_index),:].cpu().detach().numpy() - self.mean ) / self.std
-            loss = np.absolute(prop - properties[np.array(valid_index),:].cpu().detach().numpy()).mean()
-
-
+            loss = np.absolute(prop - properties[np.array(valid_index),:].cpu().detach().numpy()).mean()   
         #output = output.view(output.size(0) * output.size(1), -1)
         #loss = self.criteria(output, tgt.view(-1))
         #final_loss, entropy, MLE, batch_size = self.process_batch(batch, properties, k_sampled)
@@ -335,13 +282,13 @@ class _ModelTrainingRound:
         # self.model_trainer.graph_logger.add_scalar('average_validloss', avg_valid_loss, global_step = self.iter, save_csv= True)
 
         self._log_validation_step(epoch_index, avg_valid_loss)
-        # self._check_early_stopping_validation(avg_valid_loss)
+        self._check_early_stopping_validation(avg_valid_loss)
 
         # save model? LOUIS: There appears to be an error here, since invalid SMILES generations are skipped, if the model ends up returning no valid SMILES
         # It will be assigned a avg_valid_loss of 0, indicating a perfect score. I've added a chaeck to this to make sure this cannot happen
-        if self.model_trainer.log_dir:
-            if avg_valid_loss <= min(self.all_valid_losses) and avg_valid_loss > 0: # <------ This
-                self._save_current_model(self.model_trainer.log_dir, epoch_index, avg_valid_loss)
+        # if self.model_trainer.log_dir:
+        # if avg_valid_loss <= min(self.all_valid_losses) and avg_valid_loss > 0: # <------ This
+        self._save_current_model(self.model_trainer.log_dir, epoch_index, avg_valid_loss)
 
     def _validate_current_model(self):
         """
@@ -404,7 +351,7 @@ class _ModelTrainingRound:
         Save a copy of the model with format:
                 model_{info}_{valid_loss}
         """
-        base_name = f'LSTM_{info}_{valid_loss:.3f}'
+        base_name = f'model_{info}_{valid_loss:.3f}'
         print(base_name)
         save_model(self.model_trainer.model, base_dir, base_name)
 
@@ -430,7 +377,8 @@ class _ModelTrainingRound:
 
         If this is the case, a EarlyStopNecessary exception is raised.
         """
-        threshold = 10 * self.min_valid_loss
+        return
+        threshold = 2 * self.min_valid_loss
         if avg_valid_loss > threshold:
             raise _ModelTrainingRound.EarlyStopNecessary()
 

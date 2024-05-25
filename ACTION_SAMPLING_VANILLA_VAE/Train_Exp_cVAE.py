@@ -757,7 +757,6 @@ if __name__ == "__main__":
         /RUN PARAMETERS
         '''
         run_name = 'EXP-cVAE'
-
         if dset == 'ZINC':
             data_path = '../data/ZINC250K/'
             max_seq_len = 111

@@ -8,18 +8,18 @@ from guacamol.distribution_matching_generator import DistributionMatchingGenerat
 from rnn_model import ConditionalSmilesRnn
 from rnn_trainer import SmilesRnnTrainer
 from rnn_utils import get_tensor_dataset, load_smiles_and_properties, set_random_seed
+
 from smiles_char_dict import SmilesCharDictionary
 
 # logger = logging.getLogger(__name__)
 # logger.addHandler(logging.NullHandler())
 
 # TODO: hard-coded to 9 properties?
-# PROPERTY_SIZE = 9
+PROPERTY_SIZE = 1
 
 class SmilesRnnDistributionLearner:
     def __init__(self, data_set, output_dir, n_epochs, hidden_size=512, n_layers=3,
-                 max_len=100, batch_size=64, rnn_dropout=0.2, lr=1e-3, valid_every=100, 
-                 prop_model=None, tf_prob=1.0 ) -> None:
+                 max_len=100, batch_size=64, rnn_dropout=0.2, lr=1e-3, valid_every=100, prop_model=None) -> None:
         self.data_set = data_set
         self.n_epochs = n_epochs
         self.output_dir = output_dir
@@ -33,9 +33,7 @@ class SmilesRnnDistributionLearner:
         self.print_every = 10
         self.prop_model = prop_model
         self.seed = 42
-        self.tf_prob = tf_prob
 
-    #LOUIS: TODO: Previously -> DistributionMatchingGenerator
     def train(self, data_path):
         # GPU if available
         cuda_available = torch.cuda.is_available()
@@ -72,8 +70,7 @@ class SmilesRnnDistributionLearner:
         valid_y = (valid_y - mean) / std
         
         # convert to torch tensor, input, output smiles and properties    
-        train_set = get_tensor_datase# lstm_params = '../my_code/models/NEW_LONG_RUNS/ZINC120/LSTM/LSTM_9_0.486.pt'
-# lstm_definit = '../my_code/models/NEW_LONG_RUNS/ZINC120/LSTM/LSTM_9_0.486.json't(train_x, train_y)
+        train_set = get_tensor_dataset(train_x, train_y)  # lstm_params = '../my_code/models/NEW_LONG_RUNS/ZINC120/LSTM/LSTM_9_0.486.pt'
         valid_set = get_tensor_dataset(valid_x, valid_y)
 
 
@@ -84,7 +81,7 @@ class SmilesRnnDistributionLearner:
         # build network
         smiles_model = ConditionalSmilesRnn(input_size=n_characters,
                                             property_size=n_props, #PROPERTY_SIZE,
-                                            property_names=property_names, # Record names of properties for future use 
+                                            # property_names=property_names, # Record names of properties for future use 
                                             hidden_size=self.hidden_size,
                                             output_size=n_characters,
                                             n_layers=self.n_layers,
@@ -100,9 +97,8 @@ class SmilesRnnDistributionLearner:
                                    criteria=[criterion],
                                    optimizer=optimizer,
                                    device=device,
-                                   prop_names = property_names,
-                                   log_dir=self.output_dir,
-                                   tf_prob = self.tf_prob) 
+                                   # prop_names = property_names,
+                                   log_dir=self.output_dir) 
 
         trainer.fit(train_set, valid_set,
                     self.n_epochs, 

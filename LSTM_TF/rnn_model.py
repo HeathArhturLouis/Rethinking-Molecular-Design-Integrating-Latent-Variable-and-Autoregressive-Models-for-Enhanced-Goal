@@ -71,7 +71,6 @@ class ConditionalSmilesRnn(nn.Module):
         '''
         outputs = []
         actions = []
-
         # Expects initial tokens
 
         # input = rnn_start_token_vector(self.batch_size, self.device)
@@ -108,7 +107,7 @@ class ConditionalSmilesRnn(nn.Module):
         if return_both:
             return actions, outputs
         elif return_actions:
-            return actions, hidden    
+            return actions, hidden
         else:
             return outputs, hidden
 

@@ -97,27 +97,12 @@ class VanillaMolVAE(nn.Module):
         return properties
 
     def reparameterize(self, mu, logvar):
-        '''LOUIS:
-        Reparameterization Trick Refresher:
-            - Encoders output are [\mu, \sigma]  q(z|x) = N(z; \mu, \sigma^2)
-            - Sampling directly from N(z;\mu, \sigma^2) can't be backrpoped over
-            - Instead, sample \epsilon \sim N(0, I) [independent of params]
-            - Reparameterize z as z = \mu + \sigma \times \epsilon
-            - This keeps the probabilistic nature of z, but it's relationship with \mu \sigma is deterministic so we can compute gradients
-        '''
-        # RT only needs to be applied during training to allow for backprop. During inference we can ignore it
         if self.reparam:
-            # Sample epsilon from desired distribution (by default cmd_args.eps_std = 0.01) TODO: Why do we want less variability?
             eps = mu.data.new(mu.size()).normal_(0, self.eps_std)
             
-            # Send to GPU if required
             if self.device == 'gpu':
                 eps = eps.cuda()
-            
-            # LOUIS: This is no longer neccesary
-            # eps = Variable(eps)
-            
-            # Reparameterization (logvar to std dev is exp(1/2*\sig^2))
+
             return mu + eps * torch.exp(logvar * 0.5)            
         else:
             return mu
