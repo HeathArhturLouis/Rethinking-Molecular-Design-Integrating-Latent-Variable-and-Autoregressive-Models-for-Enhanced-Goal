@@ -90,8 +90,6 @@ class VanillaMolVAE(nn.Module):
 
         self.kl_coeff = beta
 
-
-
     def normalize_prop_scores(self, properties):
         '''
         Auxiliary function to be used by trainer/sampler class

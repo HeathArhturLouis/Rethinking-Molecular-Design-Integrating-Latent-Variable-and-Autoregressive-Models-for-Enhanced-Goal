@@ -305,7 +305,7 @@ class VanillaVAETrainerReg:
         # Expand props by latent_sample size
         properties = props.repeat_interleave(latent_sample_size, dim=0)
         # Sample latent points for each property
-        latent_points = torch.randn(properties.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32) * self.model.eps_std
+        latent_points = torch.randn(properties.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32) #  * self.model.eps_std
 
         # exp_props is [batch_size x latent_sample_size , 1]
         # exp_latents is [batch_size x latent_sample_size , latent_size]
@@ -458,7 +458,7 @@ class VanillaVAETrainerReg:
         props_repeated = props.repeat_interleave(p_theta_avg, dim=0)  
 
         # sample latent points
-        latent_points_expanded = torch.randn(props_repeated.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) * self.model.eps_std
+        latent_points_expanded = torch.randn(props_repeated.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) # * self.model.eps_std
 
         '''
         Fetch LSTM logits and actions and convert to probabilities
@@ -581,7 +581,7 @@ class VanillaVAETrainerReg:
         latent_points = torch.randn(b_size, 
                                     self.model.latent_dim, 
                                     dtype=torch.float32, 
-                                    device=self.device) * self.model.eps_std
+                                    device=self.device) # * self.model.eps_std
 
         # Add start tokens to lstm outputs
         start_tokens = torch.ones([b_size, 1], dtype=lstm_actions.dtype, device=lstm_actions.device)
@@ -856,7 +856,7 @@ class VanillaVAETrainerReg:
         '''
         expanded_props = props.repeat_interleave(n_lstm_samples, dim=0)
         
-        latent_points = torch.randn(expanded_props.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32) * self.model.eps_std
+        latent_points = torch.randn(expanded_props.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32) # * self.model.eps_std
         # latent_points is shape [b_size * n_lstm_samples x self.latent_dim]
 
         '''

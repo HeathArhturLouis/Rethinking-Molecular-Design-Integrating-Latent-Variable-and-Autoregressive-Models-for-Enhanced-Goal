@@ -265,7 +265,7 @@ class RegularizedVAETrainer:
         latent_points = torch.randn(b_size, 
                                     self.model.latent_dim, 
                                     dtype=torch.float32, 
-                                    device=self.device) * self.model.eps_std
+                                    device=self.device) # * self.model.eps_std
 
         # Add start tokens to lstm outputs
         start_tokens = torch.ones([b_size, 1], dtype=lstm_actions.dtype, device=lstm_actions.device)
@@ -556,7 +556,7 @@ class RegularizedVAETrainer:
         latent_points = latent_points = torch.randn(exp_props.shape[0], 
                                     self.model.latent_dim, 
                                     dtype=torch.float32, 
-                                    device=self.device) * self.model.eps_std
+                                    device=self.device) # * self.model.eps_std
 
         '''
         Sample LSTM Actions
@@ -679,7 +679,7 @@ class RegularizedVAETrainer:
         # Expand props by latent_sample size
         properties = props.repeat_interleave(latent_sample_size, dim=0)
         # Sample latent points for each property
-        latent_points = torch.randn(properties.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32) * self.model.eps_std
+        latent_points = torch.randn(properties.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32) # * self.model.eps_std
 
         # exp_props is [batch_size x latent_sample_size , 1]
         # exp_latents is [batch_size x latent_sample_size , latent_size]
