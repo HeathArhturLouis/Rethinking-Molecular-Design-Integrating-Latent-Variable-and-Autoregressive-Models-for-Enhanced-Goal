@@ -44,8 +44,14 @@ if __name__ == '__main__':
         os.makedirs(args.output_dir)
 
     # In SupervisedVAE the validation data is the first 10000 data samples from train file
+
+    args.lr = 1e-4
+    args.batch_size = 128
+    args.data_path = '../data/ZINC250K/ZINC120/'
+    args.max_len = 120
+
     
-    trainer = SmilesRnnDistributionLearner(data_set = "QM9",
+    trainer = SmilesRnnDistributionLearner(data_set = "ZINC",
                                            #graph_logger= graph_logger,
                                            output_dir=args.output_dir,
                                            n_epochs=args.n_epochs,

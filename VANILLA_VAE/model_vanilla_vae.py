@@ -24,8 +24,9 @@ from pytorch_initializer import weights_init
 
 # TODO: PARAMETERIZE
 GRU_LAYERS = 3
-'''
+print('Remember to set GRU_LAYERS')
 
+'''
 VAE-MODEL DEFINITION
 '''
 
@@ -86,6 +87,7 @@ class VanillaMolVAE(nn.Module):
 
         returns normalized properties
         '''
+        
         assert properties.shape[-1] == self.property_size
 
         for i in range(self.property_size):
@@ -107,7 +109,7 @@ class VanillaMolVAE(nn.Module):
         else:
             return mu
 
-    def forward(self, x_inputs, y_inputs, true_binary, return_logits = False):
+    def forward(self, x_inputs, y_inputs, true_binary, return_logits = False, return_latents = False):
         '''
         If return logits also returns raw logits
         '''
@@ -124,9 +126,16 @@ class VanillaMolVAE(nn.Module):
         kl_loss = -0.5 * torch.sum(1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
         
         if not return_logits:
-            return recon_loss, self.kl_coeff * torch.mean(kl_loss)
+            if not return_latents:
+                return recon_loss, self.kl_coeff * torch.mean(kl_loss)
+            else:
+                return recon_loss, self.kl_coeff * torch.mean(kl_loss), z
         else:
-            return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits
+            if not return_latents:
+                return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits
+            else:
+                return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits, z
+
 
 
     @property
@@ -240,6 +249,8 @@ class StateDecoder(nn.Module):
         self.z_to_latent = nn.Linear(self.latent_dim, self.latent_dim)
         if self.module_type == 'gru':
             self.gru = nn.GRU(self.latent_dim, 501, GRU_LAYERS)
+        if self.module_type == 'rnn':
+            self.gru = nn.RNN(self.latent_dim, 501, GRU_LAYERS)
         # elif cmd_args.rnn_type == 'sru':
         #    self.gru = SRU(self.latent_dim, 501, 1)
         else:

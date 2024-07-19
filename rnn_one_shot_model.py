@@ -91,12 +91,12 @@ class ConditionalSmilesRnn(nn.Module):
         if (not return_actions) and (not return_both):
             return output, hidden # return just logits
 
+        probabilities = F.softmax(output, dim=-1)
         # Sample actions
         if sampling:
-            probabilities = F.softmax(output, dim=-1)
             actions =  self.distribution_cls(probs=probabilities).sample()
         else:
-            actions = probabilities.armgax(dim=-1)
+            actions = torch.argmax(probabilities, dim=-1)
 
         if return_both:
             return actions, outputs

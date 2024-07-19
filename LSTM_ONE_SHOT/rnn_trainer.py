@@ -13,6 +13,8 @@ from rnn_utils import save_model, time_since
 from rdkit import Chem
 from smiles_char_dict import SmilesCharDictionary
 
+import random
+
 # No longer needed
 # from gencond.properties import PROPERTIES, TYPES
 sd = SmilesCharDictionary()
@@ -30,7 +32,7 @@ from property_calculator import PropertyCalculator
 
 
 class SmilesRnnTrainer:
-    def __init__(self,normalizer_mean,normalizer_std, model, criteria, optimizer, device, prop_names, log_dir=None, clip_gradients=True) -> None:
+    def __init__(self, normalizer_mean, normalizer_std, model, criteria, optimizer, device, prop_names, log_dir=None, clip_gradients=True, tf_prob = 0.3) -> None:
         self.model = model.to(device)
         self.criteria = [c.to(device) for c in criteria]
         self.optimizer = optimizer
@@ -44,9 +46,12 @@ class SmilesRnnTrainer:
 
         self.prop_names = prop_names # List of property names as defined in utils/property_calculator
         self.pc = PropertyCalculator(self.prop_names)
+        # THIS IS NEW
+        self.tf_prob = tf_prob
 
     def process_batch(self, batch, properties):
         # ship data to device
+
         # LOUIS: inp -> smiles so far | tgt -> next prediction 
         inp, tgt = batch
         inp = inp.to(self.device)
@@ -55,24 +60,38 @@ class SmilesRnnTrainer:
 
         # process data
         batch_size = inp.size(0)
-        # hidden = self.model.init_hidden(inp.size(0), self.device)
+        hidden = self.model.init_hidden(inp.size(0), self.device)
 
-        output = self.model(inp, properties)
+        # inp is 64 x 101 | Contains start token
+        # tgt is 64 x 101 | Shifted by one from start token
+        
+        # Expects initial token in input when using teacher forcing
+        # Returns both actions and logits without the initial token!
+        
+        output, hidden = self.model(
+                        x = inp, 
+                        properties = properties, 
+                        hidden = hidden, 
+                        use_teacher_forcing = True, # Dummy Input for cross compatibility# (random.random() < self.tf_prob), 
+                        sampling = True,
+                        return_actions = False,
+                        return_both = False, 
+                        seq_len = inp.shape[1])
 
-        #$ output = output.view(output.size(0) * output.size(1), -1)
-        # Criteria is 
-        # [torch.nn.CrossEntropyLoss(ignore_index=sd.pad_idx)]
+        # output is shape 64 x 100 x 47 and contains logits without initial token
+        
+        flat_output = output.view(output.size(0) * output.size(1), -1)
+        # flat_output is shape 6400 x 47
 
-        # output is batch_size x seq_len x decision_dim and contains raw logits
-        # tgt is batch_size x seq_len and contains integers (target tokens)
-        # token 0 should be ignored
+        # Remove final padding token of target
+        cropped_tgt = tgt[:, :-1]
+        flat_tgt = cropped_tgt.reshape(-1)
+        # flat_tgt is 6400
 
-        output_reshaped = output.view(-1, output.size(-1))
-        tgt_reshaped = tgt.view(-1)
+        # Under the hood this is torch.nn.CrossEntropyLoss(ignore_index=sd.pad_idx)
+        loss = self.criteria[0](flat_output, flat_tgt)
 
-        loss = self.criteria[0](output_reshaped, tgt_reshaped)
-
-        return loss, batch_size
+        return loss / batch_size, batch_size
 
     def train_on_batch(self, batch, properties):
         # setup model for training
@@ -85,7 +104,7 @@ class SmilesRnnTrainer:
 
         # optimize
         if self.clip_gradients:
-            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.model.parameters(), 0.2)
         self.optimizer.step()
 
         return loss.item(), size
@@ -112,8 +131,8 @@ class SmilesRnnTrainer:
         tgt = tgt.to(self.device)
         batch_size = inp.size(0)
         properties = properties.to(self.device)
-        # hidden = self.model.init_hidden(inp.size(0), self.device)
-        output = self.model(inp, properties)
+        hidden = self.model.init_hidden(inp.size(0), self.device)
+        output, hidden = self.model(inp, properties, hidden)
         indices = output.argmax(dim = 2)
         
         ## Retrieve SMILES for batch
@@ -156,7 +175,6 @@ class SmilesRnnTrainer:
             loss = np.absolute(prop - properties[np.array(valid_index),:].cpu().detach().numpy()).mean()
 
 
-
         #output = output.view(output.size(0) * output.size(1), -1)
         #loss = self.criteria(output, tgt.view(-1))
         #final_loss, entropy, MLE, batch_size = self.process_batch(batch, properties, k_sampled)
@@ -170,7 +188,7 @@ class SmilesRnnTrainer:
                 batch = batch_all[:-1]
                 properties = batch_all[-1]
                 
-                loss, size = self.test_on_batch(batch, properties)
+                loss, size = self.test_on_batch_MSE(batch, properties)
                 if loss > 0:
                     valid_losses += [loss]
                 else: 
@@ -277,7 +295,7 @@ class _ModelTrainingRound:
             self._report_training_progress(batch_index, epoch_index, epoch_start=train_t0)
 
         # report validation progress?
-        if batch_index > 0 and batch_index % self.valid_every == 0:
+        if batch_index >= 0 and batch_index % self.valid_every == 0:
             self._report_validation_progress(epoch_index)
 
     def _report_training_progress(self, batch_index, epoch_index, epoch_start):
@@ -317,7 +335,7 @@ class _ModelTrainingRound:
         # self.model_trainer.graph_logger.add_scalar('average_validloss', avg_valid_loss, global_step = self.iter, save_csv= True)
 
         self._log_validation_step(epoch_index, avg_valid_loss)
-        self._check_early_stopping_validation(avg_valid_loss)
+        # self._check_early_stopping_validation(avg_valid_loss)
 
         # save model? LOUIS: There appears to be an error here, since invalid SMILES generations are skipped, if the model ends up returning no valid SMILES
         # It will be assigned a avg_valid_loss of 0, indicating a perfect score. I've added a chaeck to this to make sure this cannot happen
@@ -412,7 +430,7 @@ class _ModelTrainingRound:
 
         If this is the case, a EarlyStopNecessary exception is raised.
         """
-        threshold = 2 * self.min_valid_loss
+        threshold = 10 * self.min_valid_loss
         if avg_valid_loss > threshold:
             raise _ModelTrainingRound.EarlyStopNecessary()
 

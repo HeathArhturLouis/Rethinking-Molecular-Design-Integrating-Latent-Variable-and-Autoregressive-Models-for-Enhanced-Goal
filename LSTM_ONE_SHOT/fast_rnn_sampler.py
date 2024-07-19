@@ -13,6 +13,7 @@ import sys
 import numpy as np
 
 from rnn_utils import load_rnn_model, rnn_start_token_vector
+
 import os
 sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)) , '../utils'))
 
@@ -29,7 +30,7 @@ class FastSampler:
         self.distribution_cls = Categorical
 
 
-    def sample_batch_actions(self, model: ConditionalSmilesRnn, properties, max_seq_len=100):
+    def sample_batch_actions(self, model: ConditionalSmilesRnn, properties, max_seq_len=100, random_sample = False):
         '''
         properties -- torch tensor containing self.batch_size property values
         '''
@@ -59,7 +60,10 @@ class FastSampler:
             # Turns out the decoder was handling this all along .... LOUIS TODO: Remove dead code
             # Handle terminated strings so it doesn't add characters post termination
             # termed = torch.ones(self.batch_size, dtype=torch.long) # will equal 1 for unterminated sequences
+            
+            actions, hidden = model.forward(x=None, properties=properties, hidden=hidden, use_teacher_forcing = False, sampling = random_sample, return_actions = True)
 
+            '''
             # TODO: Is this neccesary
             for i in range(0, max_seq_len):
                 # Input:
@@ -86,17 +90,19 @@ class FastSampler:
 
                 # Input for next iteration is next action
                 current_input = action.unsqueeze(dim=1)
-
+            '''
             return actions
 
-    def sample_batch_smiles(self, model: ConditionalSmilesRnn, properties, max_seq_len=100):
-        indecies = self.sample_batch_actions(model, properties, max_seq_len)
+    def sample_batch_smiles(self, model: ConditionalSmilesRnn, properties, max_seq_len=100, random_sample=False):
+        indecies = self.sample_batch_actions(model, properties, max_seq_len, random_sample=random_sample)
 
         indecies = np.array(indecies)
         # print(indecies.reshape(-1, max_seq_len + 2).shape)
         return np.array(self.sd.matrix_to_smiles(indecies))
 
-    def sample(self, model: ConditionalSmilesRnn, properties, num_to_sample : int, max_seq_len = 100):
+
+
+    def sample(self, model: ConditionalSmilesRnn, properties, num_to_sample : int, max_seq_len = 100, random_sample = False):
         '''
         sample num to smaple smiles with properties property values
         '''
@@ -113,7 +119,7 @@ class FastSampler:
             b_props = properties[i * self.batch_size : (i + 1) * self.batch_size, :]
             nts = len(b_props)
 
-            smiles += list(self.sample_batch_smiles(model=model, properties=b_props , max_seq_len = max_seq_len))
+            smiles += list(self.sample_batch_smiles(model=model, properties=b_props , max_seq_len = max_seq_len, random_sample = random_sample))
 
         remainder = num_to_sample % self.batch_size
 
@@ -138,6 +144,10 @@ if __name__ == '__main__':
     model_weights = '../models/LSTM_QM9/batch_size_20_2/LSTM_8_1.151.pt'
     model_definit = '../models/LSTM_QM9/batch_size_20_2/LSTM_8_1.151.json'
 
+    model_weights = '../models/LSTM_TF_03/LSTM_12_1.180.pt'
+    model_definit = '../models/LSTM_TF_03/LSTM_12_1.180.json'
+
+
     # TODO: Check if batch size mattters at all, i assume not
     sampler = FastSampler(batch_size = 64, device = 'cpu')
 
@@ -154,4 +164,3 @@ if __name__ == '__main__':
     # print(sampler.sample(model=model, num_to_sample = nts, properties=properties, max_seq_len = 100))
     targets = np.random.uniform(low=-3, high=3, size=nts)
     sampler.sample(model=model, properties=torch.Tensor([[a] for a in targets]), num_to_sample=nts, max_seq_len=100)
-

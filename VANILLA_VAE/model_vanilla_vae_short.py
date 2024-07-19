@@ -11,13 +11,10 @@ from torch.nn.parameter import Parameter
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
-
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
 from loss_vanilla_vae import cross_entropy_calc
-
-from torch.distributions import Categorical
 
 
 sys.path.append('%s/../util/' % os.path.dirname(os.path.realpath('__file__')))
@@ -25,18 +22,14 @@ import cfg_parser as parser
 
 from pytorch_initializer import weights_init
 
-# TODO: UGLY GLOBAL VARIABLES
+# TODO: PARAMETERIZE
 GRU_LAYERS = 3
 
-from smiles_char_dict import SmilesCharDictionary
-
-sd = SmilesCharDictionary()
 '''
 VAE-MODEL DEFINITION
 '''
 
 class VanillaMolVAE(nn.Module):
-
     def __init__(self, 
                 latent_dim, 
                 beta,
@@ -54,7 +47,6 @@ class VanillaMolVAE(nn.Module):
 
 
         super(VanillaMolVAE, self).__init__()
-
         self.pnorm_means = pnorm_means
         self.pnorm_stds = pnorm_stds
         self.latent_dim = latent_dim
@@ -77,7 +69,6 @@ class VanillaMolVAE(nn.Module):
                                 embedding_dim=self.decoder_embedding_dim,
                                 device=self.device).to(device)
 
-
         self.state_decoder = StateDecoder(max_len=self.max_decode_steps, 
                                         prop_dim=len(self.property_names),
                                         vocab_size = self.vocab_size, 
@@ -85,9 +76,7 @@ class VanillaMolVAE(nn.Module):
                                         module_type=self.decoder_mod_type, 
                                         device=self.device).to(device)
 
-        # self.loss_fnct = cross_entropy_calc
-        self.loss_fnct = torch.nn.CrossEntropyLoss(ignore_index=sd.pad_idx)
-
+        self.loss_fnct = cross_entropy_calc
         self.kl_coeff = beta
 
     def normalize_prop_scores(self, properties):
@@ -97,20 +86,19 @@ class VanillaMolVAE(nn.Module):
 
         returns normalized properties
         '''
+        
         assert properties.shape[-1] == self.property_size
-
 
         for i in range(self.property_size):
             # Apply ith index of self.pnorm_means and self.pnorm_stds to normalize every ith element of the 
             # num_properties dimension of properties
             properties[:, i] -= self.pnorm_means[i]
             properties[:, i] /= self.pnorm_stds[i]
-        
+
         return properties
 
     def reparameterize(self, mu, logvar):
         if self.reparam:
-
             eps = mu.data.new(mu.size()).normal_(0, self.eps_std)
             
             if self.device == 'gpu':
@@ -120,12 +108,9 @@ class VanillaMolVAE(nn.Module):
         else:
             return mu
 
-    def forward(self, x_inputs, y_inputs, true_binary, return_logits = False, teacher_forcing = False, return_latents=False):
+    def forward(self, x_inputs, y_inputs, true_binary, return_logits = False, return_latents = False):
         '''
-        If return logits also returns raw logits 
-
-        Accepts x_inputs With/Without start token?
-        Returns logits/actions With/Without start token?
+        If return logits also returns raw logits
         '''
         # FWD pass through encoder
         z_mean, z_log_var = self.encoder(x_inputs)
@@ -133,23 +118,9 @@ class VanillaMolVAE(nn.Module):
         
         z = self.reparameterize(z_mean, z_log_var)
         # Get raw logits 
+        raw_logits = self.state_decoder(z, y_inputs)
 
-        # def forward(self, z, y, x_inputs = None, teacher_forcing = False, return_logits = True)
-        raw_logits = self.state_decoder(z, y_inputs, x_inputs = x_inputs, teacher_forcing = teacher_forcing, return_logits = True)
-
-        # raw logits is 64 x 101 x 47 with start token
-        # true bin is 64 x 101 without start token
-
-        # Cut start token from raw_logits, and last token from true_binary
-        raw_logits = raw_logits[:, 1:, :] # 64 x 100 x 47
-        true_binary = true_binary[:, :-1] # 64 x 100
-
-
-        raw_logits = raw_logits.reshape(raw_logits.size(0) * raw_logits.size(1), -1)
-        true_binary = true_binary.reshape(true_binary.size(0) * true_binary.size(1), -1).squeeze()
-
-        recon_loss = self.loss_fnct(input = raw_logits, target = true_binary)
-
+        recon_loss = self.loss_fnct(true_tokens=true_binary.permute(1, 0), raw_logits=raw_logits)
 
         kl_loss = -0.5 * torch.sum(1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
         
@@ -163,6 +134,8 @@ class VanillaMolVAE(nn.Module):
                 return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits
             else:
                 return recon_loss, self.kl_coeff * torch.mean(kl_loss), raw_logits, z
+
+
 
     @property
     def config(self):
@@ -203,6 +176,8 @@ class CNNEncoder(nn.Module):
         self.w1 = nn.Linear(self.last_conv_size * 10, 435)
         self.mean_w = nn.Linear(435, self.latent_dim)
         self.log_var_w = nn.Linear(435, self.latent_dim)
+        
+        
         weights_init(self)
 
     def forward(self, x_cpu):
@@ -256,133 +231,55 @@ class CNNEncoder(nn.Module):
     
 
 class StateDecoder(nn.Module):
-    '''
-    Adapted to explicitly sample actions at each step, so that we can compute accurate localy normalized probabilities
-    '''
-
     def __init__(self, max_len, prop_dim, vocab_size, latent_dim, device, module_type = 'gru'):
         super(StateDecoder, self).__init__()
+
         self.device = device
         self.vocab_size = vocab_size
         self.module_type = module_type
-
+        # TODO: Make adjustable
+        # self.hidden_sz = latent_dim + cmd_args.output_dim
         self.n_props = prop_dim
-
-        # Latent dim TODO: Mak tunable parameter
-        self.action_emedding_size = latent_dim
-
-        self.latent_dim = latent_dim + self.n_props + self.action_emedding_size
-
+        self.latent_dim = latent_dim + self.n_props
 
         self.max_len = max_len
 
-        # Should also accept sampled action (this is the + 1)
-        self.action_to_latent = nn.Embedding(self.vocab_size, self.action_emedding_size)
-        # self.z_to_latent = nn.Linear(self.latent_dim, self.latent_dim)
-
-        self.distribution_cls = Categorical
-
-
+        # From latent dim + prop size to latent dim
+        self.z_to_latent = nn.Linear(self.latent_dim, self.latent_dim)
         if self.module_type == 'gru':
-            # input size is latent dim
-            # output size is 501
-            # GRU_LAYERS number of layers
-            self.gru = nn.GRU(self.latent_dim, 501, GRU_LAYERS, batch_first=True)
+            self.gru = nn.GRU(self.latent_dim, 501, GRU_LAYERS)
+        elif self.module_type == 'rnn':
+            self.gru = nn.RNN(self.latent_dim, 501, GRU_LAYERS)
+        # elif cmd_args.rnn_type == 'sru':
+        #    self.gru = SRU(self.latent_dim, 501, 1)
         else:
             raise NotImplementedError
 
         self.decoded_logits = nn.Linear(501, self.vocab_size)
 
         weights_init(self)
-    
 
-    def forward(self, z, y, x_inputs = None, teacher_forcing = True, return_logits = True, return_both = False, return_latents = False):
-        '''
-        Expects start token at beginning of input
-        Returns actions/outputs with start token
-        '''
-
+    def forward(self, z, y):
         if self.device == 'cpu':
             y = torch.tensor(y).float()
         else:
-            y = torch.tensor(y).cuda().float() #.detach()
+            y = torch.tensor(y).cuda().float() # .detach()
 
         assert len(z.size()) == 2 # assert the input is a matrix
 
-        # Condition on property + z [b_size x latent_dim]
-        conditioning_information = torch.cat((z, y.view(y.shape[0],1)), 1).unsqueeze(1)
+        ztl_inputs = torch.cat((z, y.view(y.shape[0],1)), 1)
 
-        batch_size = conditioning_information.shape[0]
+        h = self.z_to_latent(ztl_inputs)
+        #h = self.z_to_latent(torch.cat((z, torch.tensor(y).cuda().float()), 1))
 
-        initial_tokens = torch.ones(size=[batch_size, 1], device=self.device, dtype=torch.int64)
+        h = F.relu(h)
 
-        # Conditioninig information + start token [b_size x (latent_dim + 1 = self.latent_dim)]
-        # initial_input = torch.cat([initial_tokens, conditioning_information], 1)
+        # Putput size is also vocabulary size, since it's one output per logit
+        rep_h = h.expand(self.max_len, z.size()[0], z.size()[1] + self.n_props) # repeat along time steps
 
-        # GRU Expects batch_size x seq_length x features so add a seq len dimension
-        # inputs = initial_input.unsqueeze(1) # batch_size x seq_len=1 x feature_dim
-        inputs = initial_tokens
+        out, _ = self.gru(rep_h) # run multi-layer gru
+        logits = self.decoded_logits(out)
+        return logits   
 
-        # Initialize hidden st8
-        hidden = torch.zeros(size=(GRU_LAYERS, batch_size, 501), device=self.device)
 
-        all_logits = torch.zeros(size=[batch_size, self.max_len, self.vocab_size], device = self.device, dtype=torch.float64) # b_size x max_len (-1?) x decision_dim
-        all_actions = torch.zeros(size=[batch_size, self.max_len], device = self.device, dtype=torch.int64) # b_size x max_len (-1?)
-
-        all_logits[:, 0, 1] = 1 # Start token is 1
-        all_actions[:, 0] = 1
-
-        for ind in range(1, self.max_len):
-            h = self.action_to_latent(inputs) # Doesn't change dimensionality
-
-            # h is shape batch_size x seq_length x action_embedding_size
-            # Conditioning information is batch_size x (latend_size + prop_size)
-            h = torch.cat([h, conditioning_information], -1)
-
-            # h = F.relu(h)
-            out, hidden = self.gru(h, hidden) # run multi-layer gru
-            
-            logits = self.decoded_logits(out)
-
-            # Logits is shape batch_size x seq_len=1 x decision_dim=47 
-
-            # Sample action [logits -> dist -> sample -> action]
-            prob = F.softmax(logits, dim=2)
-            distribution = self.distribution_cls(probs=prob)
-            actions = distribution.sample() # Actions is : b_size x 1
-
-            if not teacher_forcing:
-                # print('No TF')
-                # print(actions.shape)
-                inputs = actions
-            else:
-                # x_inputs [0] is start token
-                # x_inputs[1] is first
-                # x_inputs is length 101
-                # print('Yes TF !!! ')
-                # print(x_inputs.shape)
-                inputs = x_inputs[:, ind].unsqueeze(1)
-                # print(inputs.shape)
-
-            all_logits[:, ind, :] = logits.squeeze()
-            all_actions[:, ind] = actions.squeeze()
-
-        # All actions is shape b_size x seq_len | 64 x 100
-        # all_logtis is shape b_size x seq_len x decision/vocab_dim | 64 x 100 x 47
-
-        if return_both:
-            if return_latents:
-                return all_actions, all_logits, z
-            else:
-                return all_actions, all_logits
-        else:
-            if return_logits:
-                if return_latents:
-                    return all_logits, z
-                else:
-                    return all_logits
-            else:
-                if return_latents:
-                    return all_actions, z
-                else:
-                    return all_actions
+    

@@ -201,7 +201,6 @@ class VanillaVAETrainerReg:
         self.lr_scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.5, patience=5, min_lr=0.00001)
 
 
-
         # Wandb tracking
         self.wandb_project = wandb_project
 
@@ -374,16 +373,17 @@ class VanillaVAETrainerReg:
 
         return logits
 
-
-
-    def alternate_policy_regularizer(self, props, latent_sample_size = 4, decoder_sample_size = 10):
+    def alternate_policy_regularizer(self, props, latents, decoder_sample_size = 30):
         '''
         props --> props
         latent_sample_size --> no latent points per prop
         decoder_sample_size --> no_decoder samples for each latent prop pair | should be large
         '''
-        props_exp = props.repeat_interleave(latent_sample_size, dim=0)
-        latent_points = torch.randn(props_exp.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32)  * self.prior_std # Should be 1
+        props_exp = props
+        latent_points = latents
+        
+        # props_exp = props.repeat_interleave(latent_sample_size, dim=0)
+        # latent_points = torch.randn(props_exp.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32)  * self.prior_std # Should be 1
 
         '''
         props_exp --> 64 x 1
@@ -449,8 +449,7 @@ class VanillaVAETrainerReg:
         # raise Exception
 
 
-
-        loss = -1 * (lstm_log_probs * decoder_log_probs).mean() * self.regularizer_weight + 1.6
+        loss = -1 * (lstm_log_probs * decoder_log_probs).mean() * self.regularizer_weight + 2.4
         
         # Original Version:
         # return (lstm_log_probs * decoder_log_probs).mean() * -1 * self.regularizer_weight + 1.0
@@ -627,7 +626,7 @@ class VanillaVAETrainerReg:
     '''
 
 
-    def compute_dkl_regularizer_loss(self, props, p_theta_avg = 1):
+    def compute_dkl_regularizer_loss(self, props, latents, p_theta_avg = 1):
         '''
         Loss is sum of KLD's between next-token probabilities for decoder and lstm under the LSTM actions, and respecting LSTM end token
         p_theta_avg is how many p_\theta samples we average over before the KL_D
@@ -638,10 +637,10 @@ class VanillaVAETrainerReg:
         '''
 
         # Expand properties by number of latent samples 
-        props_repeated = props.repeat_interleave(p_theta_avg, dim=0)  
-
+        props_repeated = props # props.repeat_interleave(p_theta_avg, dim=0)  
+        latent_points_expanded = latents
         # sample latent points
-        latent_points_expanded = torch.randn(props_repeated.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) * self.prior_std # * self.model.eps_std
+        # latent_points_expanded = torch.randn(props_repeated.shape[0], self.model.latent_dim, dtype=torch.float32, device=self.device) * self.prior_std # * self.model.eps_std
 
         '''
         Fetch LSTM logits and actions and convert to probabilities
@@ -998,10 +997,11 @@ class VanillaVAETrainerReg:
         # We're minimizing the negative of this averaged over the batch (loss)
         return self.regularizer_weight * -1 * log_probs.mean()
 
-    def alternate_policy_2_regularizer(self, props, n_lstm_samples = 60):
+    def alternate_policy_2_regularizer(self, props, latents, n_lstm_samples = 60):
         # Expand props by number of lstm samples
+        # props_ext = torch.repeat_interleave(props, n_lstm_samples, dim=0)
         props_ext = torch.repeat_interleave(props, n_lstm_samples, dim=0)
-
+        latent_points = torch.repeat_interleave(latents, n_lstm_samples, dim=0)
 
         '''#  4 unique latent + prop pair for each LSTM Sample 
         latent_points = torch.randn(
@@ -1011,13 +1011,15 @@ class VanillaVAETrainerReg:
                     dtype=torch.float32) * self.prior_std
         '''
         # n_samples lstm samples for each LATENT PROP pair
+        '''
         latent_points = torch.randn(
                     props.shape[0],
                     self.model.latent_dim, 
                     device=self.model.device,
                     dtype=torch.float32) * self.prior_std
+        '''
 
-        latent_points = torch.repeat_interleave(latent_points, n_lstm_samples, dim=0)
+        # latent_points = torch.repeat_interleave(latent_points, n_lstm_samples, dim=0)
         
 
         # Sample from decoder
@@ -1132,20 +1134,19 @@ class VanillaVAETrainerReg:
             if self.unconditional:
                 prop = torch.zeros_like(prop)
 
-            recon_loss, kl_loss, raw_logits = self.model.forward(x_inputs=inp, y_inputs=prop, true_binary=tgt,  return_logits=True)
+            recon_loss, kl_loss, raw_logits, model_latents = self.model.forward(x_inputs=inp, y_inputs=prop, true_binary=tgt,  return_logits=True, return_latents = True)
             
             regularizer_loss = torch.tensor(0.0, device=self.device)
 
             if self.regularizer_type == 'KLD':
-                for i in range(self.num_reg_samples):
-                    regularizer_loss += self.compute_dkl_regularizer_loss(prop)
+                regularizer_loss = self.compute_dkl_regularizer_loss(prop, model_latents)
                 regularizer_loss /= self.num_reg_samples
             elif self.regularizer_type == 'Pol':
                 # regularizer_loss = self.compute_policy_regularizer(props= prop, latent_sample_size = self.preg_latent_sample_size, decoder_sample_size = self.preg_decoder_sample_size)
-                regularizer_loss = self.alternate_policy_regularizer(props = prop, latent_sample_size = self.preg_latent_sample_size, decoder_sample_size = self.preg_decoder_sample_size)
+                regularizer_loss = self.alternate_policy_regularizer(props = prop, latents = model_latents, decoder_sample_size = self.preg_decoder_sample_size)
             elif self.regularizer_type == 'Pol2':
                 # regularizer_loss = self.compute_policy_2_regularizer(props = prop, n_lstm_samples=self.n_lstm_samples)
-                regularizer_loss = self.alternate_policy_2_regularizer(props = prop, n_lstm_samples=self.n_lstm_samples)
+                regularizer_loss = self.alternate_policy_2_regularizer(props = prop, latents = model_latents, n_lstm_samples=self.n_lstm_samples)
 
 
             batch_loss = recon_loss + kl_loss + regularizer_loss
@@ -1198,7 +1199,7 @@ if __name__ == "__main__":
         '''
         dset = 'QM9_36' # 'ZINC' # or 'QM9' 'QM9_36' 'ZINC120'
         device = 'cpu'
-        regularizer_type = None # 'Pol' # None # 'KLD' # 'Pol' # in 'Pol', 'Pol2', 'KLD', None
+        regularizer_type = 'Pol2' # 'Pol' # None # 'KLD' # 'Pol' # in 'Pol', 'Pol2', 'KLD', None
         run_save_folder = '../../GB-QM9/'
         
         if regularizer_type == 'KLD':

@@ -18,7 +18,8 @@ from smiles_char_dict import SmilesCharDictionary
 
 class SmilesRnnDistributionLearner:
     def __init__(self, data_set, output_dir, n_epochs, hidden_size=512, n_layers=3,
-                 max_len=100, batch_size=64, rnn_dropout=0.2, lr=1e-3, valid_every=100, prop_model=None) -> None:
+                 max_len=100, batch_size=64, rnn_dropout=0.2, lr=1e-3, valid_every=100, 
+                 prop_model=None, tf_prob=1.0 ) -> None:
         self.data_set = data_set
         self.n_epochs = n_epochs
         self.output_dir = output_dir
@@ -32,6 +33,7 @@ class SmilesRnnDistributionLearner:
         self.print_every = 10
         self.prop_model = prop_model
         self.seed = 42
+        self.tf_prob = tf_prob
 
     #LOUIS: TODO: Previously -> DistributionMatchingGenerator
     def train(self, data_path):
@@ -70,8 +72,11 @@ class SmilesRnnDistributionLearner:
         valid_y = (valid_y - mean) / std
         
         # convert to torch tensor, input, output smiles and properties    
-        train_set = get_tensor_dataset(train_x, train_y)
+        train_set = get_tensor_dataset(train_x, train_y) # lstm_params = '../my_code/models/NEW_LONG_RUNS/ZINC120/LSTM/LSTM_9_0.486.pt'
+        # lstm_definit = '../my_code/models/NEW_LONG_RUNS/ZINC120/LSTM/LSTM_9_0.486.json't(train_x, train_y)
         valid_set = get_tensor_dataset(valid_x, valid_y)
+
+
 
         sd = SmilesCharDictionary()
         n_characters = sd.get_char_num()
@@ -96,7 +101,8 @@ class SmilesRnnDistributionLearner:
                                    optimizer=optimizer,
                                    device=device,
                                    prop_names = property_names,
-                                   log_dir=self.output_dir)
+                                   log_dir=self.output_dir,
+                                   tf_prob = self.tf_prob) 
 
         trainer.fit(train_set, valid_set,
                     self.n_epochs, 

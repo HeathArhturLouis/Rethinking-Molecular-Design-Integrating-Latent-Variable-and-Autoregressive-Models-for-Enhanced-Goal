@@ -89,6 +89,8 @@ def preprocess_qm9(raw_data_dir, target_path, prop_names = False, verbose = Fals
 
         Returns: Number of molecules in dataset
         '''
+
+        
         # TODO: Make cross platform
         files = sorted(glob.glob(raw_data_dir + '/*'))
     
@@ -192,8 +194,8 @@ if __name__ == '__main__':
     ### QM9 Arguments
     parser.add_argument('--dset_name', type=str, default='QM9', help='Dataset to parse')
     parser.add_argument('--QM9_raw_data_path', type=str, default='./data/QM9/dsgdb9nsd.xyz/', help='Path to dir containing raw QM9 data.')
-    parser.add_argument('--QM9_target_path', type=str, default='./data/QM9/', help='Path to dir to store QM9 csv and split indecies.')
-    parser.add_argument('--QM9_max_smile_len', type=int, default=100, help='SMILES longer than this will be discarded.')
+    parser.add_argument('--QM9_target_path', type=str, default='./data/QM9/QM9_36/', help='Path to dir to store QM9 csv and split indecies.')
+    parser.add_argument('--QM9_max_smile_len', type=int, default=36, help='SMILES longer than this will be discarded.')
     parser.add_argument('--QM9_prop_names', type=list, default=[], help='List of properties to overrride the one found in config')
     ### QM9 Split Sizes
     parser.add_argument('--QM9_test_size', type=int, default=10000, help='Number of mols in train set. (remainder will be used for train)')
@@ -210,9 +212,8 @@ if __name__ == '__main__':
                        target_path=args.QM9_target_path,
                        verbose=args.verbose,
                        prop_names=args.QM9_prop_names,
-                       max_len = 100,# 34,
+                       max_len = 36,# 34,
                        clean_heavy_atoms = True)
-        #TODO: Remove duplicate smiles
 
         print('Generating Test-Train-Validation Splits.')
         generate_data_splits(target_path=args.QM9_target_path, 

@@ -229,7 +229,7 @@ class RegularizedVAETrainer:
         self.sd = SmilesCharDictionary()
 
 
-    def compute_regularizer_loss_kld(self, props, sample = True):
+    def compute_regularizer_loss_kld(self, props, latents, sample = True):
         '''
         Inputs:
         props -- b_size x 1 sized tensor of property scores
@@ -242,8 +242,8 @@ class RegularizedVAETrainer:
         b_size = props.shape[0] # 64
         self.reg_model = self.reg_model # .to(self.device) <-- should already be on device
 
-
         props = props.to(self.device) # props is b_size x 1
+        latent_points = latents
 
         '''
         SAMPLE LSTM MODEL ACTIONS AND LOGITS
@@ -279,10 +279,12 @@ class RegularizedVAETrainer:
         # We can do this by calling the state decoder forward, and teacher forcing on the LSTM actions
         
         # Sample random z according to our target latent distribution
+        '''
         latent_points = torch.randn(b_size, 
                                     self.model.latent_dim, 
                                     dtype=torch.float32, 
                                     device=self.device) * self.prior_std# * self.model.eps_std
+        '''
 
         # Add start tokens to lstm outputs
         start_tokens = torch.ones([b_size, 1], dtype=lstm_actions.dtype, device=lstm_actions.device)
@@ -457,14 +459,17 @@ class RegularizedVAETrainer:
 
         return sample_log_probs
 
-    def alternate_policy_regularizer(self, props, latent_sample_size = 4, decoder_sample_size = 10):
+    def alternate_policy_regularizer(self, props, latents, latent_sample_size = 4, decoder_sample_size = 10):
         '''
         props --> props
         latent_sample_size --> no latent points per prop
         decoder_sample_size --> no_decoder samples for each latent prop pair | should be large
         '''
-        props_exp = props.repeat_interleave(latent_sample_size, dim=0)
-        latent_points = torch.randn(props_exp.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32)  * self.prior_std # Should be 1
+        # props_exp = props.repeat_interleave(latent_sample_size, dim=0)
+        # latent_points = torch.randn(props_exp.shape[0], self.model.latent_dim, device=self.model.device, dtype=torch.float32)  * self.prior_std # Should be 1
+
+        props_exp = props
+        latent_points = latents
 
         '''
         props_exp --> 64 x 1
@@ -530,7 +535,7 @@ class RegularizedVAETrainer:
 
         lstm_log_probs = self.compute_log_probs(actions = decoder_actions, logits = lstm_logits)
 
-        loss = -1 * (lstm_log_probs * decoder_log_probs).mean() * self.regularizer_weight + 1.6
+        loss = -1 * (lstm_log_probs * decoder_log_probs).mean() * self.regularizer_weight + 2.4
         
         # Original Version:
         # return (lstm_log_probs * decoder_log_probs).mean() * -1 * self.regularizer_weight + 1.0
@@ -574,22 +579,22 @@ class RegularizedVAETrainer:
             # Teacher forcing with teacher forcing prob probability
             use_tf = (random.random() < self.teacher_forcing_prob)
 
-            recon_loss, kl_loss = self.model.forward(x_inputs=inp, y_inputs=prop, true_binary=tgt, teacher_forcing=use_tf)
+            recon_loss, kl_loss, model_latents = self.model.forward(x_inputs=inp, y_inputs=prop, true_binary=tgt, teacher_forcing=use_tf, return_latents = True)
 
             ## From here on out I'm winging it
             batch_loss = recon_loss + kl_loss
 
             # Regualrizer Loss (Doesn't Use Teacher Forcing) # WARNING: SAMPLING
             if self.regularizer_type == 'KLD':
-                regularizer_loss = self.compute_regularizer_loss_kld(props= prop, sample = True)
+                regularizer_loss = self.compute_regularizer_loss_kld(props= prop, latents = model_latents, sample = True)
             # elif self.regularizer_type == 'Pol1':
             #     regularizer_loss = self.compute_regularizer_loss_pol()
             elif self.regularizer_type == 'Pol2':
                 # regularizer_loss = self.compute_regularizer_loss_pol_2(props = prop, n_lstm_samples = 5)
-                regularizer_loss = self.alternate_policy_2_regularizer(props = prop, n_lstm_samples = 5)
+                regularizer_loss = self.alternate_policy_2_regularizer(props = prop, latents = model_latents, n_lstm_samples = 5)
             elif self.regularizer_type == 'Pol':
                 # regularizer_loss = self.compute_regularizer_loss_pol(props = prop)
-                regularizer_loss = self.alternate_policy_regularizer(props = prop)
+                regularizer_loss = self.alternate_policy_regularizer(props = prop, latents = model_latents)
             elif self.regularizer_type is None:
                 regularizer_loss = torch.tensor(0.0, device = self.device)
 
@@ -661,10 +666,11 @@ class RegularizedVAETrainer:
         return total_log_probs
 
 
-    def alternate_policy_2_regularizer(self, props, n_lstm_samples = 60):
+    def alternate_policy_2_regularizer(self, props, latents, n_lstm_samples = 60):
         # Expand props by number of lstm samples
 
         props_ext = torch.repeat_interleave(props, n_lstm_samples, dim=0)
+        latent_points = latents
 
         '''#  4 unique latent + prop pair for each LSTM Sample 
         latent_points = torch.randn(
@@ -674,11 +680,13 @@ class RegularizedVAETrainer:
                     dtype=torch.float32) * self.prior_std
         '''
         # n_samples lstm samples for each LATENT PROP pair
+        '''
         latent_points = torch.randn(
                     props.shape[0],
                     self.model.latent_dim, 
                     device=self.model.device,
                     dtype=torch.float32) * self.prior_std
+        '''
 
         latent_points = torch.repeat_interleave(latent_points, n_lstm_samples, dim=0)
 
@@ -986,13 +994,13 @@ if __name__ == "__main__":
 
         dset = 'QM9_36'
         device = 'cpu'
-        regularizer_type = 'Pol' # 'KLD' # 'Pol2' # in None, 'KLD', 'Pol', 'Pol2'
+        regularizer_type = 'Pol2' # 'KLD' # 'Pol2' # in None, 'KLD', 'Pol', 'Pol2'
         
         teacher_forcing_prob = 0.0
         run_save_folder = '../../GB-QM9-PRIOR/'
 
         prior_std = 1.0 # 0.03939  # prior STD for regularizer sampling
-        batch_size = 128 # 16 # 128
+        batch_size = 16 # 128
 
         beta = 0.001
         eps_std = 1.0

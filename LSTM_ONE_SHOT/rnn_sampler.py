@@ -23,7 +23,6 @@ class ConditionalSmilesRnnSampler:
 
     def sample(self, model: ConditionalSmilesRnn, properties, num_to_sample: int, max_seq_len=100):
         """
-
         Args:
             model: RNN to sample from
             properties: values of properties to condition on
@@ -33,13 +32,39 @@ class ConditionalSmilesRnnSampler:
 
         Returns: an array of SMILES strings, grouped by target properties, with no 
                  beginning nor end symbols
-
         """
-        
+
         sampler = ActionSampler(max_batch_size=self.batch_size, max_seq_length=max_seq_len, device=self.device)
+        smiles = []
 
         model.eval()
         with torch.no_grad():
-            indices = sampler.sample(model, properties, num_samples=num_to_sample)
-            smiles = np.array(self.sd.matrix_to_smiles(indices.reshape(-1, max_seq_len)))
-            return smiles.reshape(-1, num_to_sample)
+            indices = sampler.sample(model, properties)
+
+            smiles += self.sd.matrix_to_smiles(indices) # np.array(self.sd.matrix_to_smiles(indices.reshape(-1, max_seq_len)))
+            return smiles  #.reshape(-1, num_to_sample)
+
+
+if __name__ == '__main__':
+    lstm_params = '../models/NEW_LONG_RUNS/ZINC120/LSTM/model_final_73.302.pt'
+    lstm_definit = '../models/NEW_LONG_RUNS/ZINC120/LSTM/model_final_73.302.json'
+
+    from rnn_utils import load_rnn_model
+
+
+    # lstm_sampler = FastSampler(device = 'cpu', batch_size=64)
+    lstm_sampler = ConditionalSmilesRnnSampler(device='cpu', batch_size = 64)
+    lstm_model = load_rnn_model(
+            model_definition= lstm_definit,
+            model_weights = lstm_params,
+            device = 'cpu',
+            )
+
+    a = lstm_sampler.sample(
+        model=lstm_model, 
+        properties= torch.tensor([[0.0] for _ in  range(65)]), 
+        num_to_sample=65,
+        max_seq_len=120)
+
+    print(np.array(a).shape)
+    print(a)
