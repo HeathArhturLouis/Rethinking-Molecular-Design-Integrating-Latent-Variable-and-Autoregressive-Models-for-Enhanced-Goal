@@ -70,7 +70,8 @@ def generate_data_splits(target_path, n_molecules, test_size, validation_size, r
 
     test_indices = indices[:test_size]
     val_indices = indices[test_size:test_size+validation_size]
-    train_indices = indices[test_size+validation_size:]
+    # Not needed
+    # train_indices = indices[test_size+validation_size:]
 
     splits = np.zeros(n_molecules)
     splits[test_indices] = 2  # Test set

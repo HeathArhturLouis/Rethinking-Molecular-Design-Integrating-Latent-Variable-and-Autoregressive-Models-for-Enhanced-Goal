@@ -1,5 +1,5 @@
 '''
-Global Configuration
+Global Configuration for Syntax-Directed Models
 '''
 import os
 

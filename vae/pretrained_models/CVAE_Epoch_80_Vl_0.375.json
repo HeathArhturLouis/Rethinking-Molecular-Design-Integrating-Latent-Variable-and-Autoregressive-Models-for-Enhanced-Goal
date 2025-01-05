@@ -1,1 +1,0 @@
-{"latent_dim": 56, "beta": 1.0, "max_decode_steps": 101, "eps_std": 0.01, "vocab_size": 47, "pnorm_means": [0.2982513513338983], "pnorm_stds": [1.0008837558144368], "property_names": ["LogP"], "decoder_embedding_dim": 47, "device": "cpu", "reparam": false, "decoder_mod_type": "gru"}
