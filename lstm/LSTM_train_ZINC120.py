@@ -29,6 +29,7 @@ if __name__ == '__main__':
     parser.add_argument('--rnn_dropout', default=0.2, type=float, help='Dropout value for LSTM')
     parser.add_argument('--lr', default=1e-3, type=float, help='LSTM learning rate')
     parser.add_argument('--seed', default=42, type=int, help='Random seed')
+    parser.add_argument('--tf_prob', default=1.0, type=float, help='Proportion of batches trained with teacher forcing.')
     #parser.add_argument('--prop_model', default="../../data/QM9/prior.pkl.gz", help='Saved model for properties distribution')
 
     parser.add_argument('--output_dir', default='../models/LSTM_QM9/', help='Output directory')
@@ -60,7 +61,8 @@ if __name__ == '__main__':
                                            batch_size=args.batch_size,
                                            rnn_dropout=args.rnn_dropout,
                                            lr=args.lr,
-                                           valid_every=args.valid_every)
+                                           valid_every=args.valid_every,
+                                           tf_prob=args.tf_prob)
 
 #     training_set_file = args.train_data
 #     validation_set_file = args.valid_data

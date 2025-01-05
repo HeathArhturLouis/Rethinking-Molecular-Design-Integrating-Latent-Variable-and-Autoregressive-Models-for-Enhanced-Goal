@@ -1,6 +1,7 @@
 from guacamol.utils import descriptors
 from collections import OrderedDict
 
+
 PROPERTIES = OrderedDict(num_rotatable_bonds=descriptors.num_rotatable_bonds,
                          num_aromatic_rings=descriptors.num_aromatic_rings,
                          logP=descriptors.logP,
