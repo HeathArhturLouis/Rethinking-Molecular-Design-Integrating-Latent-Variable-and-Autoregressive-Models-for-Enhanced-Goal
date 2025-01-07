@@ -9,9 +9,9 @@ A more detailed presentation of the work, along with background and a review of 
 
 **Note on current state of directory:**
 
-This directory is a work in progress. As of now only the evaluation and preprocessing code have been refactored. 
+This directory is a work in progress. As of now only the evaluation and preprocessing code has been refactored. 
 
-TODO:
+Work remaining:
 - Add detailed running instructions for model training
 - Fetch pretrained ZINC250k models from cluster and upload to Figshare
 - Refactor model training directories
